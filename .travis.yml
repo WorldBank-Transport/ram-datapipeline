@@ -21,3 +21,10 @@ deploy:
 - provider: script
   skip_cleanup: true
   script: ".build_scripts/deploy.sh"
+  on:
+    branch: ${DEVELOP_BRANCH}
+- provider: script
+  skip_cleanup: true
+  script: ".build_scripts/deploy.sh"
+  on:
+    branch: ${STABLE_BRANCH}
