@@ -15,7 +15,7 @@ services:
 - docker
 
 script:
-- echo "Tests are yet to come" && exit 0
+- echo "Tests are yet to come"
 
 deploy:
 - provider: script
