@@ -1,0 +1,23 @@
+language: node_js
+
+node_js:
+- '6'
+
+env:
+  global:
+  - STABLE_BRANCH=master
+  - DEVELOP_BRANCH=develop
+  - DOCKER_ORG=wbtransport
+  - DOCKER_USERNAME=olafveerman
+  - secure: YMLk0SzCTMg7Oa0cKAf3RgSHaPNH1JYM1OfnBnOOwDVDVAuVZaNymvg59Axpsgo9lcvx53EtDrHXsL+h/TkFENW2DOSHxHy7AiRDyeEE+aOVEZeNMgbR/zAZWTt/BLNkr2Mfpk1O63LgjeLOGR90sgnuX6x97FKNuemgj1L5aOqZ2l4RxPiy8i3udWm0jGHW8rvacdGH/jjQv2JwOXpW/vl38jasxnuIuK/1eiRuPXtcZQ7rMf46uGdkWyowxWpZ1Wuq1oFW5lQE/AZKg2qQK+i1LmbAJrNgRVdhP8d/ejo7sT/UUK6tZrysdk1hvvGpzx7my0WWidI0vZzYd1LZMx4I9KPqICPgQuDgMRG77gJf52AW1Ys67JRJbNhT07VflGNf7S/1lbdIhDZ23/YwWPElEmfsm4KDScoEhxfAG7pz07yAZYbtbJshz4Lg0zvslk5DOrvumyqJnvZM1dUlQ8I8Ldo5AdfNil2U1nSY1u6WQld1YlPTNe2V9UZNiZ7bhU+jxIQLNPpWMLXEB92IlXSw8QYidaOmKIhqxclOgKwBPWMn08jPMiJohP1KkE93I6gmLSu0LgKuwjOFQeOkdtAvkEBU7zNamOJP6tyEBj9lZrkgVu6EbUFFxZt5yevdXrZDxduA386hcfrSTYJscAWQfdStmqSgjHTA8WAb6iA=
+
+services:
+- docker
+
+script:
+- echo "Tests are yet to come" && exit 0
+
+deploy:
+- provider: script
+  skip_cleanup: true
+  script: ".build_scripts/deploy.sh"
