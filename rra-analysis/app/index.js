@@ -11,8 +11,9 @@ import Operation from './utils/operation';
 import AppLogger from './utils/app-logger';
 import * as op from './utils/operation-codes';
 
-const { PROJECT_ID: projId, SCENARIO_ID: scId, CONVERSION_DIR: conversion_dir } = process.env;
-const WORK_DIR = path.resolve(conversion_dir, `p${projId}s${scId}`);
+const { PROJECT_ID: projId, SCENARIO_ID: scId, CONVERSION_DIR: conversionDir } = process.env;
+const operationId = parseInt(process.env.OPERATION_ID);
+const WORK_DIR = path.resolve(conversionDir, `p${projId}s${scId}`);
 
 const DEBUG = config.debug;
 const logger = AppLogger({ output: DEBUG });
@@ -28,7 +29,21 @@ try {
 
 logger.log('Max running processes set at', config.cpus);
 
-operation.start('generate-analysis', projId, scId)
+// Allow loading an operation through a given id.
+// This is useful when the app starts an operation that this worker has to use.
+// It's good to show the user feedback because there's some delay between the
+// time the worker is triggered to the moment it actually starts.
+//
+// If the id is given load the operation and handle it from there,
+// otherwise create a new one.
+let operationExecutor;
+if (isNaN(operationId)) {
+  operationExecutor = operation.start('generate-analysis', projId, scId);
+} else {
+  operationExecutor = operation.loadById(operationId);
+}
+
+operationExecutor
 // Start by loading the info on all the project and scenario files needed
 // for the results processing.
 .then(() => fetchFilesInfo(projId, scId))
