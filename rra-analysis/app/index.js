@@ -65,13 +65,20 @@ operationExecutor
 .then(files => Promise.all([
   getJSONFileContents(files['admin-bounds'].path),
   getJSONFileContents(files.villages.path),
-  getJSONFileContents(files.poi.path)
+  getJSONFileContents(files.poi.path),
+  db('scenarios').select('admin_areas').where('id', scId).first()
 ]))
 .then(res => {
-  let [adminAreas, villages, pois] = res;
+  let [adminAreas, villages, pois, scenario] = res;
+  let selectedAA = scenario.admin_areas.filter(o => o.selected).map(o => o.name);
+  logger.log('Selected admin areas', `(${selectedAA.length})`, selectedAA.join(', '))
 
-  // Cleanup
+  // Keep only selected and cleanup.
   let adminAreasFeat = adminAreas.features.filter((o, i) => {
+    if (selectedAA.indexOf(o.properties.name) === -1) {
+      return false;
+    }
+
     if (o.geometry.type === 'Point') {
       let id = o.properties.name ? `name: ${o.properties.name}` : `idx: ${i}`;
       logger.log('Feature is a Point -', id, '- skipping');
@@ -103,7 +110,7 @@ operationExecutor
     let time = Date.now();
     async.parallelLimit(timeMatrixTasks, config.cpus, (err, adminAreasCsv) => {
       if (err) return reject(err);
-      logger.log('Processed ', timeMatrixTasks.length, 'admin areas in', (Date.now() - time) / 1000, 'seconds');
+      logger.log('Processed', timeMatrixTasks.length, 'admin areas in', (Date.now() - time) / 1000, 'seconds');
       return resolve(adminAreasCsv);
     });
   });
@@ -141,6 +148,7 @@ operationExecutor
 .then(() => logger.toFile(`${WORK_DIR}/process.log`))
 .then(() => process.exit(0))
 .catch(err => {
+  logger.toFile(`${WORK_DIR}/process.log`)
   console.log('err', err);
   operation.log(op.OP_ERROR, {error: err})
     .then(() => operation.finish())
