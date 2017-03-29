@@ -9,7 +9,7 @@ import { writeFile, getJSONFileContents, putFile } from './s3/utils';
 import db from './db';
 import Operation from './utils/operation';
 import AppLogger from './utils/app-logger';
-import * as op from './utils/operation-codes';
+import * as opCodes from './utils/operation-codes';
 
 const { PROJECT_ID: projId, SCENARIO_ID: scId, CONVERSION_DIR: conversionDir } = process.env;
 const operationId = parseInt(process.env.OPERATION_ID);
@@ -53,11 +53,11 @@ operationExecutor
     writeFile(files.profile.path, `${WORK_DIR}/profile.lua`),
     writeFile(files['road-network'].path, `${WORK_DIR}/road-network.osm`)
   ])
-  .then(() => operation.log(op.OP_OSRM, {message: 'osm2osrm processing started'}))
+  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing started'}))
   // Create orsm files and cleanup.
   .then(() => osm2osrm(WORK_DIR))
   .then(() => osm2osrmCleanup(WORK_DIR))
-  .then(() => operation.log(op.OP_OSRM, {message: 'osm2osrm processing finished'}))
+  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'}))
   // Pass the files for the next step.
   .then(() => files);
 })
@@ -115,18 +115,18 @@ operationExecutor
     });
   });
 
-  return operation.log(op.OP_ROUTING, {message: 'Routing started', count: timeMatrixTasks.length})
+  return operation.log(opCodes.OP_ROUTING, {message: 'Routing started', count: timeMatrixTasks.length})
     .then(() => timeMatrixRunner)
-    .then((adminAreasCsv) => operation.log(op.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasCsv));
+    .then((adminAreasCsv) => operation.log(opCodes.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasCsv));
 })
 // S3 storage.
 .then(adminAreasCsv => {
   logger.group('s3').log('Storing files');
   let putFilesTasks = adminAreasCsv.map(o => saveScenarioFile(o, projId, scId));
 
-  return operation.log(op.OP_RESULTS, {message: 'Storing results'})
+  return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
     .then(() => Promise.all(putFilesTasks))
-    .then(() => operation.log(op.OP_RESULTS, {message: 'Storing results complete'}))
+    .then(() => operation.log(opCodes.OP_RESULTS, {message: 'Storing results complete'}))
     .then(() => {
       logger.group('s3').log('Storing files complete');
       // Pass it along.
@@ -143,14 +143,14 @@ operationExecutor
 
   logger.log('Done writing result CSVs');
 })
-.then(() => operation.log(3, {message: 'Files written'}))
+.then(() => operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'}))
 .then(() => operation.finish())
 .then(() => logger.toFile(`${WORK_DIR}/process.log`))
 .then(() => process.exit(0))
 .catch(err => {
   logger.toFile(`${WORK_DIR}/process.log`)
   console.log('err', err);
-  operation.log(op.OP_ERROR, {error: err})
+  operation.log(opCodes.OP_ERROR, {error: err})
     .then(() => operation.finish())
     .then(() => process.exit(1), () => process.exit(1));
 });
@@ -295,7 +295,7 @@ function createTimeMatrixTask (data, osrmFile) {
           };
 
           // Error or not, we finish the process.
-          operation.log(op.OP_ROUTING_AREA, {message: 'Routing complete', adminArea: data.adminArea.properties.name})
+          operation.log(opCodes.OP_ROUTING_AREA, {message: 'Routing complete', adminArea: data.adminArea.properties.name})
             .then(() => finish(), () => finish());
 
           // break;
