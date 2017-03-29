@@ -148,9 +148,16 @@ operationExecutor
 .then(() => logger.toFile(`${WORK_DIR}/process.log`))
 .then(() => process.exit(0))
 .catch(err => {
-  logger.toFile(`${WORK_DIR}/process.log`)
   console.log('err', err);
-  operation.log(opCodes.OP_ERROR, {error: err})
+  let eGroup = logger.group('error')
+  if (err.message) {
+    eGroup.log(err.message);
+    eGroup.log(err.stack);
+  } else {
+    eGroup.log(err);
+  }
+  logger.toFile(`${WORK_DIR}/process.log`);
+  operation.log(opCodes.OP_ERROR, {error: err.message || err})
     .then(() => operation.finish())
     .then(() => process.exit(1), () => process.exit(1));
 });
@@ -192,7 +199,7 @@ function osm2osrm (dir) {
     let osm2osrmTime = Date.now();
     let bin = path.resolve(__dirname, '../scripts/osm2osrm.sh');
     exec(`bash ${bin} -d ${dir}`, (error, stdout, stderr) => {
-      if (error) return reject(stderr);
+      if (error) return reject(new Error(stderr));
       logger.group('OSRM').log('Completed in', (Date.now() - osm2osrmTime) / 1000, 'seconds');
       return resolve(stdout);
     });
@@ -216,7 +223,7 @@ function osm2osrmCleanup (dir) {
     ].map(g => `${dir}/${g}`).join(' ');
 
     exec(`rm ${globs}`, (error, stdout, stderr) => {
-      if (error) return reject(stderr);
+      if (error) return reject(new Error(stderr));
       return resolve(stdout);
     });
   });
@@ -240,6 +247,7 @@ function createTimeMatrixTask (data, osrmFile) {
       adminArea: data.adminArea
     };
     let remainingSquares = null;
+    let processError = null;
 
     const cETA = fork(path.resolve(__dirname, 'calculateETA.js'));
     runningProcesses.push(cETA);
@@ -247,6 +255,9 @@ function createTimeMatrixTask (data, osrmFile) {
     cETA.send(processData);
     cETA.on('message', function (msg) {
       switch (msg.type) {
+        case 'error':
+          processError = msg;
+          break;
         case 'debug':
           taskLogger.log('debug', msg.data);
           break;
@@ -306,7 +317,13 @@ function createTimeMatrixTask (data, osrmFile) {
       if (code !== 0) {
         // Stop everything if one of the processes errors.
         runningProcesses.forEach(p => p.kill());
-        let error = new Error('calculateETA exited with non 0 code');
+        let error;
+        if (processError) {
+          error = new Error(`calculateETA exited with error - ${processError.data}`);
+          error.stack = processError.stack;
+        } else {
+          error = new Error(`calculateETA exited with error - unknown`);
+        }
         error.code = code;
         return callback(error);
       }
