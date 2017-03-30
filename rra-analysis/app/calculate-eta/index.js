@@ -27,6 +27,16 @@ process.env.UV_THREADPOOL_SIZE = config.cpus;
  * @return                     The process will emit several states:
  */
 process.on('message', function (e) {
+  // Capture all the errors.
+  try {
+    init(e);
+  } catch (err) {
+    process.send({type: 'error', data: err.message, stack: err.stack});
+    throw err;
+  }
+});
+
+function init (e) {
   process.send({type: 'status', data: 'srv_started', id: e.id});
   const {
     id,
@@ -65,4 +75,4 @@ process.on('message', function (e) {
     let flat = allSquaresRes.reduce((acc, squareData) => acc.concat(squareData), []);
     process.send({type: 'done', data: flat, osrm: e.osrm, id: id});
   });
-});
+}

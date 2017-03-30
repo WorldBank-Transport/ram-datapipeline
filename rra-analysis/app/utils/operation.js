@@ -46,6 +46,7 @@ export default class Operation {
     return this.db(Operation.opTable)
       .select('*')
       .where(opts)
+      .orderBy('created_at', 'desc')
       .then(res => {
         if (!res.length) return Promise.reject(new Error('Operation does not exist'));
         let op = res[0];
@@ -198,19 +199,20 @@ export default class Operation {
     }
 
     return this.db.transaction(trx => {
-      return trx(Operation.opTable)
-        .update({updated_at: (new Date())})
-        .where('id', this.id)
-        .then(() => {
-          return trx(Operation.logTable)
-            .insert({
-              operation_id: this.id,
-              code,
-              data,
-              created_at: (new Date())
-            });
-        })
-        .then(() => this);
+      let date = new Date();
+      return Promise.all([
+        trx(Operation.opTable)
+          .update({updated_at: date})
+          .where('id', this.id),
+        trx(Operation.logTable)
+          .insert({
+            operation_id: this.id,
+            code,
+            data,
+            created_at: date
+          })
+      ])
+      .then(() => this);
     });
   }
 

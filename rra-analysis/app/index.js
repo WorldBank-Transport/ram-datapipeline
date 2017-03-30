@@ -9,10 +9,11 @@ import { writeFile, getJSONFileContents, putFile } from './s3/utils';
 import db from './db';
 import Operation from './utils/operation';
 import AppLogger from './utils/app-logger';
-import * as op from './utils/operation-codes';
+import * as opCodes from './utils/operation-codes';
 
-const { PROJECT_ID: projId, SCENARIO_ID: scId, CONVERSION_DIR: conversion_dir } = process.env;
-const WORK_DIR = path.resolve(conversion_dir, `p${projId}s${scId}`);
+const { PROJECT_ID: projId, SCENARIO_ID: scId, CONVERSION_DIR: conversionDir } = process.env;
+const operationId = parseInt(process.env.OPERATION_ID);
+const WORK_DIR = path.resolve(conversionDir, `p${projId}s${scId}`);
 
 const DEBUG = config.debug;
 const logger = AppLogger({ output: DEBUG });
@@ -28,7 +29,21 @@ try {
 
 logger.log('Max running processes set at', config.cpus);
 
-operation.start('generate-analysis', projId, scId)
+// Allow loading an operation through a given id.
+// This is useful when the app starts an operation that this worker has to use.
+// It's good to show the user feedback because there's some delay between the
+// time the worker is triggered to the moment it actually starts.
+//
+// If the id is given load the operation and handle it from there,
+// otherwise create a new one.
+let operationExecutor;
+if (isNaN(operationId)) {
+  operationExecutor = operation.start('generate-analysis', projId, scId);
+} else {
+  operationExecutor = operation.loadById(operationId);
+}
+
+operationExecutor
 // Start by loading the info on all the project and scenario files needed
 // for the results processing.
 .then(() => fetchFilesInfo(projId, scId))
@@ -38,11 +53,11 @@ operation.start('generate-analysis', projId, scId)
     writeFile(files.profile.path, `${WORK_DIR}/profile.lua`),
     writeFile(files['road-network'].path, `${WORK_DIR}/road-network.osm`)
   ])
-  .then(() => operation.log(op.OP_OSRM, {message: 'osm2osrm processing started'}))
+  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing started'}))
   // Create orsm files and cleanup.
   .then(() => osm2osrm(WORK_DIR))
   .then(() => osm2osrmCleanup(WORK_DIR))
-  .then(() => operation.log(op.OP_OSRM, {message: 'osm2osrm processing finished'}))
+  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'}))
   // Pass the files for the next step.
   .then(() => files);
 })
@@ -50,13 +65,20 @@ operation.start('generate-analysis', projId, scId)
 .then(files => Promise.all([
   getJSONFileContents(files['admin-bounds'].path),
   getJSONFileContents(files.villages.path),
-  getJSONFileContents(files.poi.path)
+  getJSONFileContents(files.poi.path),
+  db('scenarios').select('admin_areas').where('id', scId).first()
 ]))
 .then(res => {
-  let [adminAreas, villages, pois] = res;
+  let [adminAreas, villages, pois, scenario] = res;
+  let selectedAA = scenario.admin_areas.filter(o => o.selected).map(o => o.name);
+  logger.log('Selected admin areas', `(${selectedAA.length})`, selectedAA.join(', '))
 
-  // Cleanup
+  // Keep only selected and cleanup.
   let adminAreasFeat = adminAreas.features.filter((o, i) => {
+    if (selectedAA.indexOf(o.properties.name) === -1) {
+      return false;
+    }
+
     if (o.geometry.type === 'Point') {
       let id = o.properties.name ? `name: ${o.properties.name}` : `idx: ${i}`;
       logger.log('Feature is a Point -', id, '- skipping');
@@ -88,23 +110,23 @@ operation.start('generate-analysis', projId, scId)
     let time = Date.now();
     async.parallelLimit(timeMatrixTasks, config.cpus, (err, adminAreasCsv) => {
       if (err) return reject(err);
-      logger.log('Processed ', timeMatrixTasks.length, 'admin areas in', (Date.now() - time) / 1000, 'seconds');
+      logger.log('Processed', timeMatrixTasks.length, 'admin areas in', (Date.now() - time) / 1000, 'seconds');
       return resolve(adminAreasCsv);
     });
   });
 
-  return operation.log(op.OP_ROUTING, {message: 'Routing started', count: timeMatrixTasks.length})
+  return operation.log(opCodes.OP_ROUTING, {message: 'Routing started', count: timeMatrixTasks.length})
     .then(() => timeMatrixRunner)
-    .then((adminAreasCsv) => operation.log(op.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasCsv));
+    .then((adminAreasCsv) => operation.log(opCodes.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasCsv));
 })
 // S3 storage.
 .then(adminAreasCsv => {
   logger.group('s3').log('Storing files');
   let putFilesTasks = adminAreasCsv.map(o => saveScenarioFile(o, projId, scId));
 
-  return operation.log(op.OP_RESULTS, {message: 'Storing results'})
+  return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
     .then(() => Promise.all(putFilesTasks))
-    .then(() => operation.log(op.OP_RESULTS, {message: 'Storing results complete'}))
+    .then(() => operation.log(opCodes.OP_RESULTS, {message: 'Storing results complete'}))
     .then(() => {
       logger.group('s3').log('Storing files complete');
       // Pass it along.
@@ -121,13 +143,21 @@ operation.start('generate-analysis', projId, scId)
 
   logger.log('Done writing result CSVs');
 })
-.then(() => operation.log(3, {message: 'Files written'}))
+.then(() => operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'}))
 .then(() => operation.finish())
 .then(() => logger.toFile(`${WORK_DIR}/process.log`))
 .then(() => process.exit(0))
 .catch(err => {
   console.log('err', err);
-  operation.log(op.OP_ERROR, {error: err})
+  let eGroup = logger.group('error')
+  if (err.message) {
+    eGroup.log(err.message);
+    eGroup.log(err.stack);
+  } else {
+    eGroup.log(err);
+  }
+  logger.toFile(`${WORK_DIR}/process.log`);
+  operation.log(opCodes.OP_ERROR, {error: err.message || err})
     .then(() => operation.finish())
     .then(() => process.exit(1), () => process.exit(1));
 });
@@ -169,7 +199,7 @@ function osm2osrm (dir) {
     let osm2osrmTime = Date.now();
     let bin = path.resolve(__dirname, '../scripts/osm2osrm.sh');
     exec(`bash ${bin} -d ${dir}`, (error, stdout, stderr) => {
-      if (error) return reject(stderr);
+      if (error) return reject(new Error(stderr));
       logger.group('OSRM').log('Completed in', (Date.now() - osm2osrmTime) / 1000, 'seconds');
       return resolve(stdout);
     });
@@ -193,7 +223,7 @@ function osm2osrmCleanup (dir) {
     ].map(g => `${dir}/${g}`).join(' ');
 
     exec(`rm ${globs}`, (error, stdout, stderr) => {
-      if (error) return reject(stderr);
+      if (error) return reject(new Error(stderr));
       return resolve(stdout);
     });
   });
@@ -217,6 +247,7 @@ function createTimeMatrixTask (data, osrmFile) {
       adminArea: data.adminArea
     };
     let remainingSquares = null;
+    let processError = null;
 
     const cETA = fork(path.resolve(__dirname, 'calculateETA.js'));
     runningProcesses.push(cETA);
@@ -224,6 +255,9 @@ function createTimeMatrixTask (data, osrmFile) {
     cETA.send(processData);
     cETA.on('message', function (msg) {
       switch (msg.type) {
+        case 'error':
+          processError = msg;
+          break;
         case 'debug':
           taskLogger.log('debug', msg.data);
           break;
@@ -272,7 +306,7 @@ function createTimeMatrixTask (data, osrmFile) {
           };
 
           // Error or not, we finish the process.
-          operation.log(op.OP_ROUTING_AREA, {message: 'Routing complete', adminArea: data.adminArea.properties.name})
+          operation.log(opCodes.OP_ROUTING_AREA, {message: 'Routing complete', adminArea: data.adminArea.properties.name})
             .then(() => finish(), () => finish());
 
           // break;
@@ -283,7 +317,13 @@ function createTimeMatrixTask (data, osrmFile) {
       if (code !== 0) {
         // Stop everything if one of the processes errors.
         runningProcesses.forEach(p => p.kill());
-        let error = new Error('calculateETA exited with non 0 code');
+        let error;
+        if (processError) {
+          error = new Error(`calculateETA exited with error - ${processError.data}`);
+          error.stack = processError.stack;
+        } else {
+          error = new Error(`calculateETA exited with error - unknown`);
+        }
         error.code = code;
         return callback(error);
       }
