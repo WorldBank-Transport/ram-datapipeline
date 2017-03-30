@@ -18,7 +18,7 @@ var missing = [
 ].filter(v => !process.env[v]);
 
 if (missing.length) {
-  console.error(`Missing env vars: ${missing.join(', ')}`);
+  throw new Error(`Missing env vars on rra-analysis: ${missing.join(', ')}`);
   process.exit(1);
 }
 
