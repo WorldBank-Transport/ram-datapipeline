@@ -71,7 +71,7 @@ operationExecutor
 .then(res => {
   let [adminAreas, villages, pois, scenario] = res;
   let selectedAA = scenario.admin_areas.filter(o => o.selected).map(o => o.name);
-  logger.log('Selected admin areas', `(${selectedAA.length})`, selectedAA.join(', '))
+  logger.log('Selected admin areas', `(${selectedAA.length})`, selectedAA.join(', '));
 
   // Keep only selected and cleanup.
   let adminAreasFeat = adminAreas.features.filter((o, i) => {
@@ -144,12 +144,13 @@ operationExecutor
   logger.log('Done writing result CSVs');
 })
 .then(() => operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'}))
+.then(() => operation.log(opCodes.OP_COMPLETE, {message: 'Operation complete'}))
 .then(() => operation.finish())
 .then(() => logger.toFile(`${WORK_DIR}/process.log`))
 .then(() => process.exit(0))
 .catch(err => {
   console.log('err', err);
-  let eGroup = logger.group('error')
+  let eGroup = logger.group('error');
   if (err.message) {
     eGroup.log(err.message);
     eGroup.log(err.stack);
