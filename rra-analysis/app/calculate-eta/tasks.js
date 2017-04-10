@@ -108,11 +108,26 @@ export function createProcessAreaTask (workArea, poiByType, villages, osrm, maxT
         // Add coordinates.
         properties.lat = village.geometry.coordinates[1];
         properties.lon = village.geometry.coordinates[0];
-        // Add time to each poi.
-        poiTime.forEach(item => {
+        properties.poi = {};
+
+        // Compute the final time to each poi. OSRM returns the time it takes
+        // from the nearest feature of the source point to the destination point.
+        // There may be a distance between de actual point and what OSRM uses
+        // as the actual source. This is represented by `nearest` and is in
+        // meters. We need to compute the time it would take someone to do it
+        // using the WALKSPEED
+
+        // Walk speed in km/h
+        const WALKSPEED = 4;
+
+        let nearest = poiTime.find(p => p.poi === 'nearest');
+        // Compute time to each poi.
+        poiTime.filter(p => p.poi !== 'nearest').forEach(item => {
+          // Walk speed in the unit we need. s/m (seconds per meter)
+          let speed = WALKSPEED * 1000 / 3600;
           // item.list is an array of values in the same order as the
           // village, hence access by index is fine.
-          properties[item.poi] = item.list[villageIdx].eta;
+          properties.poi[item.poi] = item.list[villageIdx].eta + nearest.list[villageIdx].distance * speed;
         });
 
         squareResults.push(properties);
@@ -155,10 +170,10 @@ export function createPoiTypeNearestTask (osrm, villagesCoords) {
             return cb(err);
           }
 
-          var neartime = res.waypoints[0].distance;
-          // Return the time taken to reach the point, using the village id
+          var distance = res.waypoints[0].distance;
+          // Return the distance to reach the point, using the village id
           // as identifier.
-          return cb(null, {sourceIdx: idx, time: neartime});
+          return cb(null, {sourceIdx: idx, distance});
         });
       };
     });
@@ -171,7 +186,7 @@ export function createPoiTypeNearestTask (osrm, villagesCoords) {
         console.warn(err);
         return;
       }
-      nearTasksRes.forEach(near => { results[near.sourceIdx] = {eta: near.time}; });
+      nearTasksRes.forEach(near => { results[near.sourceIdx] = {distance: near.distance}; });
       // Return the subcallback (POI level callback)
       return callback(null, { poi: 'nearest', list: results });
     });
