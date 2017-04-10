@@ -3,6 +3,7 @@ import path from 'path';
 import { exec, fork } from 'child_process';
 import fs from 'fs';
 import async from 'async';
+import json2csv from 'json2csv';
 
 import config from './config';
 import { writeFile, getJSONFileContents, putFile } from './s3/utils';
@@ -108,21 +109,32 @@ operationExecutor
   // they spawn new processes. Use async but Promisify to continue chain.
   let timeMatrixRunner = new Promise((resolve, reject) => {
     let time = Date.now();
-    async.parallelLimit(timeMatrixTasks, config.cpus, (err, adminAreasCsv) => {
+    async.parallelLimit(timeMatrixTasks, config.cpus, (err, adminAreasData) => {
       if (err) return reject(err);
       logger.log('Processed', timeMatrixTasks.length, 'admin areas in', (Date.now() - time) / 1000, 'seconds');
-      return resolve(adminAreasCsv);
+      return resolve(adminAreasData);
     });
   });
 
   return operation.log(opCodes.OP_ROUTING, {message: 'Routing started', count: timeMatrixTasks.length})
     .then(() => timeMatrixRunner)
-    .then((adminAreasCsv) => operation.log(opCodes.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasCsv));
+    .then(adminAreasData => operation.log(opCodes.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasData));
+})
+.then(adminAreasData => {
+  let processedJson = adminAreasData.map(result => {
+    return {
+      name: result.adminArea.name,
+      results: result.json
+    };
+  });
+
+  return saveScenarioFile('results-all', 'all', processedJson, projId, scId)
+    .then(() => adminAreasData);
 })
 // S3 storage.
-.then(adminAreasCsv => {
+.then(adminAreasData => {
   logger.group('s3').log('Storing files');
-  let putFilesTasks = adminAreasCsv.map(o => saveScenarioFile(o, projId, scId));
+  let putFilesTasks = adminAreasData.map(o => saveScenarioFile('results', o.adminArea.name.replace(' ', ''), o.csv, projId, scId));
 
   return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
     .then(() => Promise.all(putFilesTasks))
@@ -130,13 +142,13 @@ operationExecutor
     .then(() => {
       logger.group('s3').log('Storing files complete');
       // Pass it along.
-      return adminAreasCsv;
+      return adminAreasData;
     });
 })
 // File storage
-.then(adminAreasCsv => {
+.then(adminAreasData => {
   logger.log('Writing result CSVs');
-  adminAreasCsv.forEach(o => {
+  adminAreasData.forEach(o => {
     let name = 'results--' + o.adminArea.name.replace(' ', '') + '.csv';
     fs.writeFileSync(`${WORK_DIR}/${name}`, o.csv);
   });
@@ -285,24 +297,45 @@ function createTimeMatrixTask (data, osrmFile) {
             taskLogger.log('No results returned');
             return callback(null, {
               adminArea: data.adminArea.properties,
-              csv: 'error\nThere are no results for this admin area'
+              csv: 'error\nThere are no results for this admin area',
+              json: {}
             });
           }
           taskLogger.log(`Results returned for ${result.length} villages`);
 
-          let header = Object.keys(result[0]);
-          // Ensure the row order is the same as the header.
-          let rows = result.map(r => header.map(h => r[h]));
+          // Prepare the csv.
+          // To form the fields array for json2csv convert from:
+          // {
+          //  prop1: 'prop1',
+          //  prop2: 'prop2',
+          //  poi: {
+          //    poiName: 'poi-name'
+          //  },
+          //  nearest: 'nearest'
+          // }
+          // to
+          // [prop1, prop2, poi.poiName, nearest]
+          //
+          // Poi fields as paths for nested objects.
+          let poiFields = Object.keys(data.pois);
+          poiFields = poiFields.map(o => `poi.${o}`);
 
-          // Convert to string
-          let csv = header.join(',') + '\n';
-          csv += rows.map(r => r.join(',')).join('\n');
+          // Other fields, except poi
+          let fields = Object.keys(result[0]);
+          let poiIdx = fields.indexOf('poi');
+          poiIdx !== -1 && fields.splice(poiIdx, 1);
+
+          // Concat.
+          fields = fields.concat(poiFields);
+
+          let csv = json2csv({ data: result, fields: fields });
 
           const finish = () => {
             cETA.disconnect();
             return callback(null, {
               adminArea: data.adminArea.properties,
-              csv
+              csv,
+              json: result
             });
           };
 
@@ -339,12 +372,12 @@ function createTimeMatrixTask (data, osrmFile) {
  * @param  {number} scId   Scenario id.
  * @return {Promise}
  */
-function saveScenarioFile (data, projId, scId) {
-  const fileName = `results_${data.adminArea.name.replace(' ', '')}_${Date.now()}`;
+function saveScenarioFile (type, name, data, projId, scId) {
+  const fileName = `results_${name}_${Date.now()}`;
   const filePath = `scenario-${scId}/${fileName}`;
   const fileData = {
     name: fileName,
-    type: 'results',
+    type: type,
     path: filePath,
     project_id: projId,
     scenario_id: scId,
@@ -354,7 +387,8 @@ function saveScenarioFile (data, projId, scId) {
 
   logger.group('s3').log('Saving file', filePath);
 
-  return putFile(filePath, data.csv)
+  let contents = type === 'results' ? data : JSON.stringify(data);
+  return putFile(filePath, contents)
     .then(() => db('scenarios_files')
       .returning('*')
       .insert(fileData)
