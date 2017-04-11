@@ -97,7 +97,8 @@ operationExecutor
       adminArea: area,
       villages: villages,
       pois: {
-        townhall: pois
+        // At the moment only one poi type is allowed.
+        pointOfInterest: pois
       },
       maxSpeed: 120,
       maxTime: 3600
