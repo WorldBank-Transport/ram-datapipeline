@@ -1,3 +1,3 @@
 #!/bin/bash
 
-docker build -t rra-analysis .
+npm run lint && docker build -t rra-analysis .
