@@ -157,7 +157,7 @@ operationExecutor
   logger.log('Done writing result CSVs');
 })
 .then(() => operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'}))
-.then(() => operation.log(opCodes.OP_COMPLETE, {message: 'Operation complete'}))
+.then(() => operation.log(opCodes.OP_SUCCESS, {message: 'Operation complete'}))
 .then(() => operation.finish())
 .then(() => logger.toFile(`${WORK_DIR}/process.log`))
 .then(() => process.exit(0))
