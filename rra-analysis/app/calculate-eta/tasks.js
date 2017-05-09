@@ -253,7 +253,10 @@ export function createPoiTypeTask (osrm, poiGroup, villagesCoords) {
       if (res.durations && res.sources && res.destinations &&
       res.durations.length === res.sources.length &&
       res.durations[0].length === res.destinations.length) {
-        results = res.durations.map(timeToPoi => ({ eta: Math.min(...timeToPoi) }));
+        // When there's no connection between two places OSRM returns null, and
+        // it is interpreted as 0. We have to convert all nulls to Infinity to
+        // ensure correct calculations.
+        results = res.durations.map(timeToPoi => ({ eta: Math.min(...timeToPoi.map(t => t !== null ? t : Infinity)) }));
       }
 
       return callback(null, {poi: poiGroup.type, list: results});
