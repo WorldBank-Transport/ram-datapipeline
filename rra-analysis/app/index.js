@@ -157,20 +157,11 @@ operationExecutor
   logger.log('Done writing result CSVs');
 })
 // Update generation time.
-// Since it's a JSON field we need to fetch it and update it.
-.then(() => db.transaction(function (trx) {
-  return trx('scenarios')
-    .select('*')
-    .where('id', scId)
-    .first()
-    .then(scenario => {
-      let data = scenario.data;
-      data.res_gen_at = (new Date());
-      return trx('scenarios')
-        .update({ data })
-        .where('id', scId);
-    });
-}))
+.then(() => db('scenarios_settings')
+  .update({value: (new Date())})
+  .where('scenario_id', scId)
+  .where('key', 'res_gen_at')
+)
 .then(() => operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'}))
 .then(() => operation.log(opCodes.OP_SUCCESS, {message: 'Operation complete'}))
 .then(() => operation.finish())
