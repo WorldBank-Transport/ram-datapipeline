@@ -63,15 +63,39 @@ operationExecutor
   // Pass the files for the next step.
   .then(() => files);
 })
-// Load the other needed files.
-.then(files => Promise.all([
-  getJSONFileContents(files.villages.path),
-  getJSONFileContents(files.poi.path),
-  db('scenarios_settings').select('value').where('key', 'admin_areas').where('scenario_id', scId).first()
-]))
+.then(files => {
+  let result = {
+    // villages,
+    // pois,
+    // selectedAA
+  };
+
+  // Load the pois.
+  let pois = files.poi;
+  let types = Object.keys(pois);
+  let loaded = {};
+
+  return Promise.all(types.map(k => getJSONFileContents(pois[k].path)))
+    .then(data => {
+      types.forEach((type, idx) => {
+        loaded[type] = data[idx];
+      });
+      // Replace the raw poi with the loaded ones.
+      result.pois = loaded;
+    })
+    .then(() => Promise.all([
+      getJSONFileContents(files.villages.path),
+      db('scenarios_settings').select('value').where('key', 'admin_areas').where('scenario_id', scId).first()
+    ]))
+    .then(data => {
+      result.villages = data[0];
+      result.selectedAA = JSON.parse(data[1].value);
+
+      return result;
+    });
+})
 .then(res => {
-  let [villages, pois, selectedAA] = res;
-  selectedAA = JSON.parse(selectedAA.value);
+  let {villages, pois, selectedAA} = res;
 
   // Get selected adminAreas.
   return db('projects_aa')
@@ -97,20 +121,17 @@ operationExecutor
         }))
       };
 
-      return [villages, pois, adminAreasFC];
+      return {villages, pois, adminAreasFC};
     });
 })
 .then(res => {
-  let [villages, pois, adminAreasFC] = res;
+  let {villages, pois, adminAreasFC} = res;
 
   var timeMatrixTasks = adminAreasFC.features.map(area => {
     const data = {
       adminArea: area,
       villages: villages,
-      pois: {
-        // At the moment only one poi type is allowed.
-        pointOfInterest: pois
-      },
+      pois,
       maxSpeed: 120,
       maxTime: 3600
     };
@@ -212,7 +233,17 @@ function fetchFilesInfo (projId, scId) {
     let obj = {};
     files
       .reduce((acc, f) => acc.concat(f), [])
-      .forEach(o => (obj[o.type] = o));
+      .forEach(o => {
+        // Special handling for pois.
+        if (o.type === 'poi') {
+          if (!obj['poi']) {
+            obj['poi'] = {};
+          }
+          obj['poi'][o.subtype] = o;
+        } else {
+          obj[o.type] = o;
+        }
+      });
     return obj;
   });
 }
