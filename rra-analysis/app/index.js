@@ -4,6 +4,7 @@ import { exec, fork } from 'child_process';
 import fs from 'fs';
 import async from 'async';
 import json2csv from 'json2csv';
+import kebabCase from 'lodash.kebabcase';
 
 import config from './config';
 import { writeFile, getJSONFileContents, putFile } from './s3/utils';
@@ -64,35 +65,45 @@ operationExecutor
 })
 // Load the other needed files.
 .then(files => Promise.all([
-  getJSONFileContents(files['admin-bounds'].path),
   getJSONFileContents(files.villages.path),
   getJSONFileContents(files.poi.path),
-  db('scenarios').select('admin_areas').where('id', scId).first()
+  db('scenarios_settings').select('value').where('key', 'admin_areas').where('scenario_id', scId).first()
 ]))
 .then(res => {
-  let [adminAreas, villages, pois, scenario] = res;
-  let selectedAA = scenario.admin_areas.filter(o => o.selected).map(o => o.name);
-  logger.log('Selected admin areas', `(${selectedAA.length})`, selectedAA.join(', '));
+  let [villages, pois, selectedAA] = res;
+  selectedAA = JSON.parse(selectedAA.value);
 
-  // Keep only selected and cleanup.
-  let adminAreasFeat = adminAreas.features.filter((o, i) => {
-    if (selectedAA.indexOf(o.properties.name) === -1) {
-      return false;
-    }
+  // Get selected adminAreas.
+  return db('projects_aa')
+    .select('*')
+    .where('project_id', projId)
+    .whereIn('id', selectedAA)
+    .then(aa => {
+      // Convert admin areas to featureCollection.
+      let adminAreasFC = {
+        type: 'FeatureCollection',
+        features: aa.map(o => ({
+          type: 'Feature',
+          properties: {
+            id: o.id,
+            name: o.name,
+            type: o.type,
+            project_id: o.project_id
+          },
+          geometry: {
+            type: o.geometry.length === 1 ? 'Polygon' : 'MultiPolygon',
+            coordinates: o.geometry
+          }
+        }))
+      };
 
-    if (o.geometry.type === 'Point') {
-      let id = o.properties.name ? `name: ${o.properties.name}` : `idx: ${i}`;
-      logger.log('Feature is a Point -', id, '- skipping');
-      return false;
-    }
-    if (!o.properties.name) {
-      logger.log('Feature without name', `idx: ${i}`, '- skipping');
-      return false;
-    }
-    return true;
-  });
+      return [villages, pois, adminAreasFC];
+    });
+})
+.then(res => {
+  let [villages, pois, adminAreasFC] = res;
 
-  var timeMatrixTasks = adminAreasFeat.map(area => {
+  var timeMatrixTasks = adminAreasFC.features.map(area => {
     const data = {
       adminArea: area,
       villages: villages,
@@ -124,6 +135,7 @@ operationExecutor
 .then(adminAreasData => {
   let processedJson = adminAreasData.map(result => {
     return {
+      id: result.adminArea.id,
       name: result.adminArea.name,
       results: result.json
     };
@@ -135,7 +147,7 @@ operationExecutor
 // S3 storage.
 .then(adminAreasData => {
   logger.group('s3').log('Storing files');
-  let putFilesTasks = adminAreasData.map(o => saveScenarioFile('results', o.adminArea.name.replace(' ', ''), o.csv, projId, scId));
+  let putFilesTasks = adminAreasData.map(o => saveScenarioFile('results', `${o.adminArea.id}-${kebabCase(o.adminArea.name)}`, o.csv, projId, scId));
 
   return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
     .then(() => Promise.all(putFilesTasks))
@@ -150,7 +162,7 @@ operationExecutor
 .then(adminAreasData => {
   logger.log('Writing result CSVs');
   adminAreasData.forEach(o => {
-    let name = 'results--' + o.adminArea.name.replace(' ', '') + '.csv';
+    let name = `results--${o.adminArea.id}-${kebabCase(o.adminArea.name)}.csv`;
     fs.writeFileSync(`${WORK_DIR}/${name}`, o.csv);
   });
 
@@ -186,7 +198,7 @@ function fetchFilesInfo (projId, scId) {
   return Promise.all([
     db('projects_files')
       .select('*')
-      .whereIn('type', ['profile', 'villages', 'admin-bounds'])
+      .whereIn('type', ['profile', 'villages'])
       .where('project_id', projId),
     db('scenarios_files')
       .select('*')
