@@ -65,7 +65,7 @@ operationExecutor
 })
 .then(files => {
   let result = {
-    // villages,
+    // origins,
     // pois,
     // selectedAA
   };
@@ -84,18 +84,18 @@ operationExecutor
       result.pois = loaded;
     })
     .then(() => Promise.all([
-      getJSONFileContents(files.villages.path),
+      getJSONFileContents(files.origins.path),
       db('scenarios_settings').select('value').where('key', 'admin_areas').where('scenario_id', scId).first()
     ]))
     .then(data => {
-      result.villages = data[0];
+      result.origins = data[0];
       result.selectedAA = JSON.parse(data[1].value);
 
       return result;
     });
 })
 .then(res => {
-  let {villages, pois, selectedAA} = res;
+  let {origins, pois, selectedAA} = res;
 
   // Get selected adminAreas.
   return db('projects_aa')
@@ -121,16 +121,16 @@ operationExecutor
         }))
       };
 
-      return {villages, pois, adminAreasFC};
+      return {origins, pois, adminAreasFC};
     });
 })
 .then(res => {
-  let {villages, pois, adminAreasFC} = res;
+  let {origins, pois, adminAreasFC} = res;
 
   var timeMatrixTasks = adminAreasFC.features.map(area => {
     const data = {
       adminArea: area,
-      villages: villages,
+      origins: origins,
       pois,
       maxSpeed: 120,
       maxTime: 3600
@@ -219,7 +219,7 @@ function fetchFilesInfo (projId, scId) {
   return Promise.all([
     db('projects_files')
       .select('*')
-      .whereIn('type', ['profile', 'villages'])
+      .whereIn('type', ['profile', 'origins'])
       .where('project_id', projId),
     db('scenarios_files')
       .select('*')
@@ -303,7 +303,7 @@ function createTimeMatrixTask (data, osrmFile) {
       id: 2,
       poi: data.pois,
       gridSize: 30,
-      villages: data.villages,
+      origins: data.origins,
       osrmFile: osrmFile,
       maxTime: data.maxTime,
       maxSpeed: data.maxSpeed,
@@ -343,7 +343,7 @@ function createTimeMatrixTask (data, osrmFile) {
           let result = msg.data;
 
           if (!result.length) {
-            // Result may be empty if in the work area there are no villages.
+            // Result may be empty if in the work area there are no origins.
             taskLogger.log('No results returned');
             return callback(null, {
               adminArea: data.adminArea.properties,
@@ -351,7 +351,7 @@ function createTimeMatrixTask (data, osrmFile) {
               json: {}
             });
           }
-          taskLogger.log(`Results returned for ${result.length} villages`);
+          taskLogger.log(`Results returned for ${result.length} origins`);
 
           // Prepare the csv.
           // To form the fields array for json2csv convert from:
