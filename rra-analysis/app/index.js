@@ -59,73 +59,16 @@ operationExecutor
   // Create orsm files and cleanup.
   .then(() => osm2osrm(WORK_DIR))
   .then(() => osm2osrmCleanup(WORK_DIR))
-  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'}))
-  // Pass the files for the next step.
-  .then(() => files);
+  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'}));
 })
-.then(files => {
-  let result = {
-    // origins,
-    // pois,
-    // selectedAA
-  };
-
-  // Load the pois.
-  let pois = files.poi;
-  let types = Object.keys(pois);
-  let loaded = {};
-
-  return Promise.all(types.map(k => getJSONFileContents(pois[k].path)))
-    .then(data => {
-      types.forEach((type, idx) => {
-        loaded[type] = data[idx];
-      });
-      // Replace the raw poi with the loaded ones.
-      result.pois = loaded;
-    })
-    .then(() => Promise.all([
-      getJSONFileContents(files.origins.path),
-      db('scenarios_settings').select('value').where('key', 'admin_areas').where('scenario_id', scId).first()
-    ]))
-    .then(data => {
-      result.origins = data[0];
-      result.selectedAA = JSON.parse(data[1].value);
-
-      return result;
-    });
-})
+// Fetch the remaining needed data.
+.then(() => Promise.all([
+  fetchOrigins(projId),
+  fetchPoi(projId, scId),
+  fetchAdminAreas(projId, scId)
+]))
 .then(res => {
-  let {origins, pois, selectedAA} = res;
-
-  // Get selected adminAreas.
-  return db('projects_aa')
-    .select('*')
-    .where('project_id', projId)
-    .whereIn('id', selectedAA)
-    .then(aa => {
-      // Convert admin areas to featureCollection.
-      let adminAreasFC = {
-        type: 'FeatureCollection',
-        features: aa.map(o => ({
-          type: 'Feature',
-          properties: {
-            id: o.id,
-            name: o.name,
-            type: o.type,
-            project_id: o.project_id
-          },
-          geometry: {
-            type: o.geometry.length === 1 ? 'Polygon' : 'MultiPolygon',
-            coordinates: o.geometry
-          }
-        }))
-      };
-
-      return {origins, pois, adminAreasFC};
-    });
-})
-.then(res => {
-  let {origins, pois, adminAreasFC} = res;
+  let [origins, pois, adminAreasFC] = res;
 
   var timeMatrixTasks = adminAreasFC.features.map(area => {
     const data = {
@@ -164,6 +107,48 @@ operationExecutor
 
   return saveScenarioFile('results-all', 'all', processedJson, projId, scId)
     .then(() => adminAreasData);
+})
+// DB storage.
+.then(adminAreasData => {
+  let results = [];
+  let resultsPois = [];
+  adminAreasData.forEach(aa => {
+    aa.json.forEach(o => {
+      results.push({
+        scenario_id: scId,
+        project_id: projId,
+        origin_id: o.id,
+        project_aa_id: aa.adminArea.id
+      });
+
+      let pois = Object.keys(o.poi).map(k => ({
+        type: k,
+        time: Math.round(o.poi[k])
+      }));
+      // Will be flattened later.
+      // The array is constructed in this way so we can match the index of the
+      // results array and attribute the correct id.
+      resultsPois.push(pois);
+    });
+  });
+
+  return db.transaction(function (trx) {
+    return trx.batchInsert('results', results)
+      .returning('id')
+      .then(ids => {
+        // Add ids to the resultsPoi and flatten the array in the process.
+        let flat = [];
+        resultsPois.forEach((resPoi, rexIdx) => {
+          resPoi.forEach(poi => {
+            poi.result_id = ids[rexIdx];
+            flat.push(poi);
+          });
+        });
+        return flat;
+      })
+      .then(data => trx.batchInsert('results_poi', data));
+  })
+  .then(() => adminAreasData);
 })
 // S3 storage.
 .then(adminAreasData => {
@@ -215,37 +200,108 @@ operationExecutor
     .then(() => process.exit(1), () => process.exit(1));
 });
 
+//
+// Execution code ends here. From here on there are the helper functions
+// used in the script.
+// -------------------------------------
+// This is just a little separation.
+//
+
 function fetchFilesInfo (projId, scId) {
   return Promise.all([
     db('projects_files')
       .select('*')
-      .whereIn('type', ['profile', 'origins'])
-      .where('project_id', projId),
+      .whereIn('type', ['profile'])
+      .where('project_id', projId)
+      .first(),
     db('scenarios_files')
       .select('*')
-      .whereIn('type', ['poi', 'road-network'])
+      .whereIn('type', ['road-network'])
       .where('project_id', projId)
       .where('scenario_id', scId)
+      .first()
   ])
-  .then(files => {
-    // Merge scenario and project files and convert the files array
-    // into an object indexed by type.
-    let obj = {};
-    files
-      .reduce((acc, f) => acc.concat(f), [])
-      .forEach(o => {
-        // Special handling for pois.
-        if (o.type === 'poi') {
-          if (!obj['poi']) {
-            obj['poi'] = {};
+  .then(files => ({
+    'profile': files[0],
+    'road-network': files[1]
+  }));
+}
+
+function fetchOrigins (projId) {
+  return db('projects_origins')
+    .select('*')
+    .where('project_id', projId)
+    .then(origins => {
+      // Convert origins to featureCollection.
+      return {
+        type: 'FeatureCollection',
+        features: origins.map(o => ({
+          type: 'Feature',
+          properties: {
+            id: o.id,
+            name: o.name
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: o.coordinates
           }
-          obj['poi'][o.subtype] = o;
-        } else {
-          obj[o.type] = o;
-        }
-      });
-    return obj;
-  });
+        }))
+      };
+    });
+}
+
+function fetchPoi (projId, scId) {
+  return db('scenarios_files')
+    .select('*')
+    .where('type', 'poi')
+    .where('project_id', projId)
+    .where('scenario_id', scId)
+    .then(files => Promise.all(files.map(f => getJSONFileContents(f.path)))
+      .then(fileData => {
+        // Index pois by subtype.
+        let loaded = {};
+        files.forEach((file, idx) => {
+          loaded[file.subtype] = fileData[idx];
+        });
+
+        return loaded;
+      })
+    );
+}
+
+function fetchAdminAreas (projId, scId) {
+  return db('scenarios_settings')
+    .select('value')
+    .where('key', 'admin_areas')
+    .where('scenario_id', scId)
+    .first()
+    .then(aa => JSON.parse(aa.value))
+    .then(selectedAA => {
+      // Get selected adminAreas.
+      return db('projects_aa')
+        .select('*')
+        .where('project_id', projId)
+        .whereIn('id', selectedAA)
+        .then(aa => {
+          // Convert admin areas to featureCollection.
+          return {
+            type: 'FeatureCollection',
+            features: aa.map(o => ({
+              type: 'Feature',
+              properties: {
+                id: o.id,
+                name: o.name,
+                type: o.type,
+                project_id: o.project_id
+              },
+              geometry: {
+                type: o.geometry.length === 1 ? 'Polygon' : 'MultiPolygon',
+                coordinates: o.geometry
+              }
+            }))
+          };
+        });
+    });
 }
 
 /**
@@ -348,7 +404,7 @@ function createTimeMatrixTask (data, osrmFile) {
             return callback(null, {
               adminArea: data.adminArea.properties,
               csv: 'error\nThere are no results for this admin area',
-              json: {}
+              json: []
             });
           }
           taskLogger.log(`Results returned for ${result.length} origins`);
