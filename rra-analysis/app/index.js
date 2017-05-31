@@ -229,24 +229,63 @@ function fetchFilesInfo (projId, scId) {
 
 function fetchOrigins (projId) {
   return db('projects_origins')
-    .select('*')
+    .select(
+      'projects_origins.id',
+      'projects_origins.name',
+      'projects_origins.coordinates',
+      'projects_origins_indicators.key',
+      'projects_origins_indicators.value'
+    )
+    .innerJoin('projects_origins_indicators', 'projects_origins.id', 'projects_origins_indicators.origin_id')
     .where('project_id', projId)
     .then(origins => {
-      // Convert origins to featureCollection.
+      // Group by indicators.
+      let indGroup = {};
+      origins.forEach(o => {
+        let hold = indGroup[o.id];
+        if (!hold) {
+          hold = {
+            id: o.id,
+            name: o.name,
+            coordinates: o.coordinates
+          };
+        }
+        hold[o.key] = o.value;
+        indGroup[o.id] = hold;
+      });
+
       return {
         type: 'FeatureCollection',
-        features: origins.map(o => ({
-          type: 'Feature',
-          properties: {
-            id: o.id,
-            name: o.name
-          },
-          geometry: {
-            type: 'Point',
-            coordinates: o.coordinates
-          }
-        }))
+        features: Object.keys(indGroup).map(k => {
+          let props = Object.assign({}, indGroup[k]);
+          delete props.coordinates;
+          return {
+            type: 'Feature',
+            properties: props,
+            geometry: {
+              type: 'Point',
+              coordinates: indGroup[k].coordinates
+            }
+          };
+        })
       };
+
+      // Convert origins to featureCollection.
+      // TODO: Use this once the results are returned from the db.
+      // return {
+      //   type: 'FeatureCollection',
+      //   features: origins.map(o => ({
+      //     type: 'Feature',
+      //     properties: {
+      //       id: o.id,
+      //       name: o.name
+      //     },
+      //     geometry: {
+      //       type: 'Point',
+      //       coordinates: o.coordinates
+      //     }
+      //   }))
+      // };
     });
 }
 
