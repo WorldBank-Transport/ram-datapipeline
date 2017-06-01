@@ -21,6 +21,9 @@ const DEBUG = config.debug;
 const logger = AppLogger({ output: DEBUG });
 const operation = new Operation(db);
 
+// Needs to be global, so it can be decreased.
+var totalAdminAreasToProcess = 0;
+
 try {
   fs.mkdirSync(WORK_DIR);
 } catch (e) {
@@ -69,6 +72,7 @@ operationExecutor
 ]))
 .then(res => {
   let [origins, pois, adminAreasFC] = res;
+  totalAdminAreasToProcess = adminAreasFC.features.length;
 
   var timeMatrixTasks = adminAreasFC.features.map(area => {
     const data = {
@@ -437,56 +441,62 @@ function createTimeMatrixTask (data, osrmFile) {
           // Build csv file.
           let result = msg.data;
 
+          let csv = null;
+          let json = null;
+
           if (!result.length) {
             // Result may be empty if in the work area there are no origins.
             taskLogger.log('No results returned');
-            return callback(null, {
-              adminArea: data.adminArea.properties,
-              csv: 'error\nThere are no results for this admin area',
-              json: []
-            });
+            csv = 'error\nThere are no results for this admin area';
+            json = [];
+          } else {
+            taskLogger.log(`Results returned for ${result.length} origins`);
+
+            // Prepare the csv.
+            // To form the fields array for json2csv convert from:
+            // {
+            //  prop1: 'prop1',
+            //  prop2: 'prop2',
+            //  poi: {
+            //    poiName: 'poi-name'
+            //  },
+            //  nearest: 'nearest'
+            // }
+            // to
+            // [prop1, prop2, poi.poiName, nearest]
+            //
+            // Poi fields as paths for nested objects.
+            let poiFields = Object.keys(data.pois);
+            poiFields = poiFields.map(o => `poi.${o}`);
+
+            // Other fields, except poi
+            let fields = Object.keys(result[0]);
+            let poiIdx = fields.indexOf('poi');
+            poiIdx !== -1 && fields.splice(poiIdx, 1);
+
+            // Concat.
+            fields = fields.concat(poiFields);
+
+            csv = json2csv({ data: result, fields: fields });
+            json = result;
           }
-          taskLogger.log(`Results returned for ${result.length} origins`);
-
-          // Prepare the csv.
-          // To form the fields array for json2csv convert from:
-          // {
-          //  prop1: 'prop1',
-          //  prop2: 'prop2',
-          //  poi: {
-          //    poiName: 'poi-name'
-          //  },
-          //  nearest: 'nearest'
-          // }
-          // to
-          // [prop1, prop2, poi.poiName, nearest]
-          //
-          // Poi fields as paths for nested objects.
-          let poiFields = Object.keys(data.pois);
-          poiFields = poiFields.map(o => `poi.${o}`);
-
-          // Other fields, except poi
-          let fields = Object.keys(result[0]);
-          let poiIdx = fields.indexOf('poi');
-          poiIdx !== -1 && fields.splice(poiIdx, 1);
-
-          // Concat.
-          fields = fields.concat(poiFields);
-
-          let csv = json2csv({ data: result, fields: fields });
 
           const finish = () => {
             cETA.disconnect();
             return callback(null, {
               adminArea: data.adminArea.properties,
               csv,
-              json: result
+              json
             });
           };
 
           // Error or not, we finish the process.
-          operation.log(opCodes.OP_ROUTING_AREA, {message: 'Routing complete', adminArea: data.adminArea.properties.name})
-            .then(() => finish(), () => finish());
+          operation.log(opCodes.OP_ROUTING_AREA, {
+            message: 'Routing complete',
+            adminArea: data.adminArea.properties.name,
+            remaining: --totalAdminAreasToProcess
+          })
+          .then(() => finish(), () => finish());
 
           // break;
       }
