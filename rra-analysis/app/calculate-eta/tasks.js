@@ -30,6 +30,7 @@ import async from 'async';
  */
 export function createProcessAreaTask (workArea, poiByType, origins, osrm, maxTime, maxSpeed, id) {
   return (callback) => {
+    process.send({type: 'debug', data: `Start square processing.`, id: id});
     if (!workArea) {
       // The square doesn't intersect with the adminArea.
       // Return an empty result.
@@ -52,7 +53,6 @@ export function createProcessAreaTask (workArea, poiByType, origins, osrm, maxTi
 
     // For each POI type (banks, hospitals...) get at least 4 in the area.
     // If there are none increase the search buffer until they're found.
-    // TODO: Handle case where there are never at least 4 POIs.
     for (let key in poiByType) {
       let poiSet;
       let time = maxTime;
@@ -66,6 +66,7 @@ export function createProcessAreaTask (workArea, poiByType, origins, osrm, maxTi
         poiSet = poisInBuffer(workArea, poiByType[key], time, speed);
         time += 900;
       } while (poiSet.features.length < minPoi);
+      process.send({type: 'debug', data: `Using ${poiSet.features.length} pois. Time: ${time - 900}`, id: id});
 
       poilist.push({type: key, items: poiSet});
     }
@@ -183,8 +184,8 @@ export function createPoiTypeNearestTask (osrm, originsCoords) {
     // otherwise will mess up the async.parallel
     async.series(nearTasks, (err, nearTasksRes) => {
       if (err) {
-        console.warn(err);
-        return;
+        process.send({type: 'status', data: 'error'});
+        return callback(err);
       }
       nearTasksRes.forEach(near => { results[near.sourceIdx] = {distance: near.distance}; });
       // Return the subcallback (POI level callback)

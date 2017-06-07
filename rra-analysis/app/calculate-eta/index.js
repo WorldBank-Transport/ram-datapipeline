@@ -2,7 +2,7 @@
 import OSRM from 'osrm';
 import async from 'async';
 import intersect from '@turf/intersect';
-import envelope from '@turf/envelope';
+import bbox from '@turf/bbox';
 import squareGrid from '@turf/square-grid';
 
 import config from '../config';
@@ -53,8 +53,7 @@ function init (e) {
   process.send({type: 'status', data: 'srv_loaded_files', id: id});
 
   // Split the input region in squares for parallelisation.
-  let box = envelope(adminArea);
-  let extent = [box.geometry.coordinates[0][0][0], box.geometry.coordinates[0][0][1], box.geometry.coordinates[0][2][0], box.geometry.coordinates[0][2][1]];
+  let extent = bbox(adminArea);
   let squares = squareGrid(extent, gridSize || 30, 'kilometers').features;
   process.send({type: 'squarecount', data: squares.length, id: id});
 

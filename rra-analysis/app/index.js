@@ -71,6 +71,7 @@ operationExecutor
   fetchAdminAreas(projId, scId)
 ]))
 .then(res => {
+  logger.log('Data fetched');
   let [origins, pois, adminAreasFC] = res;
   totalAdminAreasToProcess = adminAreasFC.features.length;
 
@@ -80,11 +81,11 @@ operationExecutor
       origins: origins,
       pois,
       maxSpeed: 120,
-      maxTime: 3600
+      maxTime: 3600 / 2
     };
     return createTimeMatrixTask(data, `${WORK_DIR}/road-network.osrm`);
   });
-
+  logger.log('Tasks created');
   // createTimeMatrixTask need to be executed in parallel with a limit because
   // they spawn new processes. Use async but Promisify to continue chain.
   let timeMatrixRunner = new Promise((resolve, reject) => {
@@ -312,6 +313,18 @@ function fetchPoi (projId, scId) {
     );
 }
 
+const arrayDepth = (arr) => Array.isArray(arr) ? arrayDepth(arr[0]) + 1 : 0;
+const getGeometryType = (geometry) => {
+  switch (arrayDepth(geometry)) {
+    case 3:
+      return 'Polygon';
+    case 4:
+      return 'MultiPolygon';
+    default:
+      throw new Error('Malformed coordinates array. Expected Polygon or MultiPolygon.');
+  }
+};
+
 function fetchAdminAreas (projId, scId) {
   return db('scenarios_settings')
     .select('value')
@@ -338,7 +351,7 @@ function fetchAdminAreas (projId, scId) {
                 project_id: o.project_id
               },
               geometry: {
-                type: o.geometry.length === 1 ? 'Polygon' : 'MultiPolygon',
+                type: getGeometryType(o.geometry),
                 coordinates: o.geometry
               }
             }))
