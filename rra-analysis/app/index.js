@@ -128,7 +128,7 @@ operationExecutor
 
       let pois = Object.keys(o.poi).map(k => ({
         type: k,
-        time: Math.round(o.poi[k])
+        time: o.poi[k] === null ? null : Math.round(o.poi[k])
       }));
       // Will be flattened later.
       // The array is constructed in this way so we can match the index of the
