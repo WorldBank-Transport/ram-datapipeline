@@ -1,20 +1,31 @@
 #!/bin/bash
 
-# Create work folder
-mkdir conversion
-echo "disk=/var/tmp/stxxl,2500,memory" > ./conversion/.stxxl
-ln -s ../node_modules/osrm/profiles/lib/ ./conversion/lib
+PROJECT_ID=$1
+SCENARIO_ID=$2
 
-export 'DB_URI=postgresql://rra:rra@172.17.0.1:5432/rra'
-export 'PROJECT_ID=2000'
-export 'SCENARIO_ID=2000'
-export 'STORAGE_HOST=172.17.0.1'
-export 'STORAGE_PORT=9000'
-export 'STORAGE_ENGINE=minio'
-export 'STORAGE_ACCESS_KEY=minio'
-export 'STORAGE_SECRET_KEY=miniostorageengine'
-export 'STORAGE_BUCKET=rra'
-export 'STORAGE_REGION=us-east-1'
-export 'CONVERSION_DIR=./conversion'
+PROJECT_ID="${PROJECT_ID:-2000}"
+SCENARIO_ID="${SCENARIO_ID:-2000}"
 
-node index.js
+read -p "Project $PROJECT_ID, Scenario $SCENARIO_ID. Continue? (y/n) " -n 1 -r
+echo    # (optional) move to a new line
+if [[ $REPLY =~ ^[Yy]$ ]]
+then
+  # Create work folder
+  mkdir conversion
+  echo "disk=/var/tmp/stxxl,2500,memory" > ./conversion/.stxxl
+  ln -s ../node_modules/osrm/profiles/lib/ ./conversion/lib
+
+  export 'DB_URI=postgresql://rra:rra@172.17.0.1:5432/rra'
+  export "PROJECT_ID=$PROJECT_ID"
+  export "SCENARIO_ID=$SCENARIO_ID"
+  export 'STORAGE_HOST=172.17.0.1'
+  export 'STORAGE_PORT=9000'
+  export 'STORAGE_ENGINE=minio'
+  export 'STORAGE_ACCESS_KEY=minio'
+  export 'STORAGE_SECRET_KEY=miniostorageengine'
+  export 'STORAGE_BUCKET=rra'
+  export 'STORAGE_REGION=us-east-1'
+  export 'CONVERSION_DIR=./conversion'
+
+  node index.js
+fi
