@@ -1,5 +1,5 @@
 'use strict';
-import { range, villagesInRegion, poisInBuffer } from './utils';
+import { range, originsInRegion, poisInBuffer } from './utils';
 import async from 'async';
 
 /**
@@ -8,7 +8,7 @@ import async from 'async';
  * @param  {Feature} workArea  Area to process.
  * @param  {Object} poiByType  Object where each key represents a poi type and
  *                             the value is a FeatureCollection of points.
- * @param  {FeatureCollection} villages  Points representing villages
+ * @param  {FeatureCollection} origins  Points representing origins
  * @param  {Object} osrm       The osrm object as created by new OSRM()
  * @param  {number} maxTime    Value in seconds
  * @param  {number} maxSpeed   Value in km/h
@@ -28,8 +28,9 @@ import async from 'async';
  *   ]
  *   `poiType` is the time in seconds to reach it
  */
-export function createProcessAreaTask (workArea, poiByType, villages, osrm, maxTime, maxSpeed, id) {
+export function createProcessAreaTask (workArea, poiByType, origins, osrm, maxTime, maxSpeed, id) {
   return (callback) => {
+    process.send({type: 'debug', data: `Start square processing.`, id: id});
     if (!workArea) {
       // The square doesn't intersect with the adminArea.
       // Return an empty result.
@@ -37,22 +38,21 @@ export function createProcessAreaTask (workArea, poiByType, villages, osrm, maxT
       return callback(null, []);
     }
 
-    // Get the villages in the area.
-    let workingSet = villagesInRegion(workArea, villages);
+    // Get the origins in the area.
+    let workingSet = originsInRegion(workArea, origins);
     if (workingSet.features.length === 0) {
-      // There are no villages within the square.
+      // There are no origins within the square.
       // Return an empty result.
-      process.send({type: 'square', data: 'No villages', id: id});
+      process.send({type: 'square', data: 'No origins', id: id});
       return callback(null, []);
     }
 
-    process.send({type: 'debug', data: `Villages in working set: ${workingSet.features.length}`, id: id});
+    process.send({type: 'debug', data: `Origins in working set: ${workingSet.features.length}`, id: id});
 
     let poilist = [];
 
     // For each POI type (banks, hospitals...) get at least 4 in the area.
     // If there are none increase the search buffer until they're found.
-    // TODO: Handle case where there are never at least 4 POIs.
     for (let key in poiByType) {
       let poiSet;
       let time = maxTime;
@@ -66,6 +66,7 @@ export function createProcessAreaTask (workArea, poiByType, villages, osrm, maxT
         poiSet = poisInBuffer(workArea, poiByType[key], time, speed);
         time += 900;
       } while (poiSet.features.length < minPoi);
+      process.send({type: 'debug', data: `Using ${poiSet.features.length} pois. Time: ${time - 900}`, id: id});
 
       poilist.push({type: key, items: poiSet});
     }
@@ -74,35 +75,35 @@ export function createProcessAreaTask (workArea, poiByType, villages, osrm, maxT
     // and the nearest road
     poilist.push({type: 'nearest'});
 
-    // Create a flat array of villages coordinates, to be used as source for
+    // Create a flat array of origins coordinates, to be used as source for
     // the routing calculation.
-    let villagesCoords = workingSet.features.map(feat => ([feat.geometry.coordinates[0], feat.geometry.coordinates[1]]));
-    if (villagesCoords.length === 0) throw new Error('no sources');
+    let originsCoords = workingSet.features.map(feat => ([feat.geometry.coordinates[0], feat.geometry.coordinates[1]]));
+    if (originsCoords.length === 0) throw new Error('no sources');
 
     // One task per POI type to calculate the distance from the POI to
-    // each one of the villages.
+    // each one of the origins.
     let poiTypeTasks = poilist.map(poiGroupType => {
       if (poiGroupType.type === 'nearest') {
-        return createPoiTypeNearestTask(osrm, villagesCoords);
+        return createPoiTypeNearestTask(osrm, originsCoords);
       } else {
-        return createPoiTypeTask(osrm, poiGroupType, villagesCoords);
+        return createPoiTypeTask(osrm, poiGroupType, originsCoords);
       }
     });
 
     // In series, because the main async will keep track of the threadpool
     // and adding parallel tasks here overloads it.
     async.series(poiTypeTasks, (err, poiTime) => {
-      // poiTime -> for each poi type an array of the villages indexes and
+      // poiTime -> for each poi type an array of the origins indexes and
       // the shortest distance to that poi.
       if (err) {
         throw err;
       }
 
-      // Store the properties of the villages in this square and add
+      // Store the properties of the origins in this square and add
       // additional properties with the time to reach the poi.
       let squareResults = [];
 
-      // Villages properties.
+      // Origins properties.
       workingSet.features.forEach((village, villageIdx) => {
         let properties = Object.assign({}, village.properties);
         // Add coordinates.
@@ -142,7 +143,7 @@ export function createProcessAreaTask (workArea, poiByType, villages, osrm, maxT
 /**
  * Handle POIs of type nearest
  * @param  {Object} osrm           The osrm object as created by new OSRM()
- * @param  {Array} villagesCoords  Array of village coordinates (Points)
+ * @param  {Array} originsCoords  Array of village coordinates (Points)
  *
  * @return {Function}              Task function for async
  *   When resolved the function will return the shortest time from each village
@@ -156,12 +157,12 @@ export function createProcessAreaTask (workArea, poiByType, villages, osrm, maxT
  *      ...
  *    ]
  *   }
- *   `list` is ordered the same way as the input `villagesCoords`
+ *   `list` is ordered the same way as the input `originsCoords`
  */
-export function createPoiTypeNearestTask (osrm, villagesCoords) {
+export function createPoiTypeNearestTask (osrm, originsCoords) {
   return (callback) => {
     // Calculate distance from each village to the nearest road segment.
-    let nearTasks = villagesCoords.map((village, idx) => {
+    let nearTasks = originsCoords.map((village, idx) => {
       return (cb) => {
         osrm.nearest({ coordinates: [village] }, (err, res) => {
           if (err) {
@@ -183,8 +184,8 @@ export function createPoiTypeNearestTask (osrm, villagesCoords) {
     // otherwise will mess up the async.parallel
     async.series(nearTasks, (err, nearTasksRes) => {
       if (err) {
-        console.warn(err);
-        return;
+        process.send({type: 'status', data: 'error'});
+        return callback(err);
       }
       nearTasksRes.forEach(near => { results[near.sourceIdx] = {distance: near.distance}; });
       // Return the subcallback (POI level callback)
@@ -199,7 +200,7 @@ export function createPoiTypeNearestTask (osrm, villagesCoords) {
  * @param  {Object} poiGroup       Poi group object
  * @param  {String} poiGroup.type  Type of the poi
  * @param  {Array} poiGroup.items  Feature collection of poi
- * @param  {Array} villagesCoords  Array of village coordinates (Points)
+ * @param  {Array} originsCoords  Array of village coordinates (Points)
  *
  * @return {Function}              Task function for async
  *   When resolved the function will return the shortest time from each village
@@ -213,9 +214,9 @@ export function createPoiTypeNearestTask (osrm, villagesCoords) {
  *      ...
  *    ]
  *   }
- *   `list` is ordered the same way as the input `villagesCoords`
+ *   `list` is ordered the same way as the input `originsCoords`
  */
-export function createPoiTypeTask (osrm, poiGroup, villagesCoords) {
+export function createPoiTypeTask (osrm, poiGroup, originsCoords) {
   return (callback) => {
     // Create a flat array with the coordinates of the poi, to be used
     // as destinations.
@@ -224,16 +225,16 @@ export function createPoiTypeTask (osrm, poiGroup, villagesCoords) {
     if (poiCoords.length === 0) throw new Error('no destinations');
 
     // OSRM v5 requires one list of coordinates and two arrays of indices.
-    let allCoords = villagesCoords.concat(poiCoords);
-    // Indexes of {allCoords} that refer to villages
-    let villagesIndexes = range(0, villagesCoords.length);
+    let allCoords = originsCoords.concat(poiCoords);
+    // Indexes of {allCoords} that refer to origins
+    let originsIndexes = range(0, originsCoords.length);
     // Indexes of {allCoords} that refer to poi
-    let poiIndexes = range(villagesCoords.length, villagesCoords.length + poiCoords.length);
+    let poiIndexes = range(originsCoords.length, originsCoords.length + poiCoords.length);
 
     let osrmOptions = {
       coordinates: allCoords,
       destinations: poiIndexes,
-      sources: villagesIndexes
+      sources: originsIndexes
     };
 
     let results = [];

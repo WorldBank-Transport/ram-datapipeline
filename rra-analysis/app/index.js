@@ -4,6 +4,7 @@ import { exec, fork } from 'child_process';
 import fs from 'fs';
 import async from 'async';
 import json2csv from 'json2csv';
+import kebabCase from 'lodash.kebabcase';
 
 import config from './config';
 import { writeFile, getJSONFileContents, putFile } from './s3/utils';
@@ -19,6 +20,9 @@ const WORK_DIR = path.resolve(conversionDir, `p${projId}s${scId}`);
 const DEBUG = config.debug;
 const logger = AppLogger({ output: DEBUG });
 const operation = new Operation(db);
+
+// Needs to be global, so it can be decreased.
+var totalAdminAreasToProcess = 0;
 
 try {
   fs.mkdirSync(WORK_DIR);
@@ -58,54 +62,30 @@ operationExecutor
   // Create orsm files and cleanup.
   .then(() => osm2osrm(WORK_DIR))
   .then(() => osm2osrmCleanup(WORK_DIR))
-  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'}))
-  // Pass the files for the next step.
-  .then(() => files);
+  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'}));
 })
-// Load the other needed files.
-.then(files => Promise.all([
-  getJSONFileContents(files['admin-bounds'].path),
-  getJSONFileContents(files.villages.path),
-  getJSONFileContents(files.poi.path),
-  db('scenarios').select('admin_areas').where('id', scId).first()
+// Fetch the remaining needed data.
+.then(() => Promise.all([
+  fetchOrigins(projId),
+  fetchPoi(projId, scId),
+  fetchAdminAreas(projId, scId)
 ]))
 .then(res => {
-  let [adminAreas, villages, pois, scenario] = res;
-  let selectedAA = scenario.admin_areas.filter(o => o.selected).map(o => o.name);
-  logger.log('Selected admin areas', `(${selectedAA.length})`, selectedAA.join(', '));
+  logger.log('Data fetched');
+  let [origins, pois, adminAreasFC] = res;
+  totalAdminAreasToProcess = adminAreasFC.features.length;
 
-  // Keep only selected and cleanup.
-  let adminAreasFeat = adminAreas.features.filter((o, i) => {
-    if (selectedAA.indexOf(o.properties.name) === -1) {
-      return false;
-    }
-
-    if (o.geometry.type === 'Point') {
-      let id = o.properties.name ? `name: ${o.properties.name}` : `idx: ${i}`;
-      logger.log('Feature is a Point -', id, '- skipping');
-      return false;
-    }
-    if (!o.properties.name) {
-      logger.log('Feature without name', `idx: ${i}`, '- skipping');
-      return false;
-    }
-    return true;
-  });
-
-  var timeMatrixTasks = adminAreasFeat.map(area => {
+  var timeMatrixTasks = adminAreasFC.features.map(area => {
     const data = {
       adminArea: area,
-      villages: villages,
-      pois: {
-        // At the moment only one poi type is allowed.
-        pointOfInterest: pois
-      },
+      origins: origins,
+      pois,
       maxSpeed: 120,
-      maxTime: 3600
+      maxTime: 3600 / 2
     };
     return createTimeMatrixTask(data, `${WORK_DIR}/road-network.osrm`);
   });
-
+  logger.log('Tasks created');
   // createTimeMatrixTask need to be executed in parallel with a limit because
   // they spawn new processes. Use async but Promisify to continue chain.
   let timeMatrixRunner = new Promise((resolve, reject) => {
@@ -124,6 +104,7 @@ operationExecutor
 .then(adminAreasData => {
   let processedJson = adminAreasData.map(result => {
     return {
+      id: result.adminArea.id,
       name: result.adminArea.name,
       results: result.json
     };
@@ -132,10 +113,52 @@ operationExecutor
   return saveScenarioFile('results-all', 'all', processedJson, projId, scId)
     .then(() => adminAreasData);
 })
+// DB storage.
+.then(adminAreasData => {
+  let results = [];
+  let resultsPois = [];
+  adminAreasData.forEach(aa => {
+    aa.json.forEach(o => {
+      results.push({
+        scenario_id: scId,
+        project_id: projId,
+        origin_id: o.id,
+        project_aa_id: aa.adminArea.id
+      });
+
+      let pois = Object.keys(o.poi).map(k => ({
+        type: k,
+        time: o.poi[k] === null ? null : Math.round(o.poi[k])
+      }));
+      // Will be flattened later.
+      // The array is constructed in this way so we can match the index of the
+      // results array and attribute the correct id.
+      resultsPois.push(pois);
+    });
+  });
+
+  return db.transaction(function (trx) {
+    return trx.batchInsert('results', results)
+      .returning('id')
+      .then(ids => {
+        // Add ids to the resultsPoi and flatten the array in the process.
+        let flat = [];
+        resultsPois.forEach((resPoi, rexIdx) => {
+          resPoi.forEach(poi => {
+            poi.result_id = ids[rexIdx];
+            flat.push(poi);
+          });
+        });
+        return flat;
+      })
+      .then(data => trx.batchInsert('results_poi', data));
+  })
+  .then(() => adminAreasData);
+})
 // S3 storage.
 .then(adminAreasData => {
   logger.group('s3').log('Storing files');
-  let putFilesTasks = adminAreasData.map(o => saveScenarioFile('results', o.adminArea.name.replace(' ', ''), o.csv, projId, scId));
+  let putFilesTasks = adminAreasData.map(o => saveScenarioFile('results', `${o.adminArea.id}-${kebabCase(o.adminArea.name)}`, o.csv, projId, scId));
 
   return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
     .then(() => Promise.all(putFilesTasks))
@@ -150,27 +173,18 @@ operationExecutor
 .then(adminAreasData => {
   logger.log('Writing result CSVs');
   adminAreasData.forEach(o => {
-    let name = 'results--' + o.adminArea.name.replace(' ', '') + '.csv';
+    let name = `results--${o.adminArea.id}-${kebabCase(o.adminArea.name)}.csv`;
     fs.writeFileSync(`${WORK_DIR}/${name}`, o.csv);
   });
 
   logger.log('Done writing result CSVs');
 })
 // Update generation time.
-// Since it's a JSON field we need to fetch it and update it.
-.then(() => db.transaction(function (trx) {
-  return trx('scenarios')
-    .select('*')
-    .where('id', scId)
-    .first()
-    .then(scenario => {
-      let data = scenario.data;
-      data.res_gen_at = (new Date());
-      return trx('scenarios')
-        .update({ data })
-        .where('id', scId);
-    });
-}))
+.then(() => db('scenarios_settings')
+  .update({value: (new Date())})
+  .where('scenario_id', scId)
+  .where('key', 'res_gen_at')
+)
 .then(() => operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'}))
 .then(() => operation.log(opCodes.OP_SUCCESS, {message: 'Operation complete'}))
 .then(() => operation.finish())
@@ -191,27 +205,159 @@ operationExecutor
     .then(() => process.exit(1), () => process.exit(1));
 });
 
+//
+// Execution code ends here. From here on there are the helper functions
+// used in the script.
+// -------------------------------------
+// This is just a little separation.
+//
+
 function fetchFilesInfo (projId, scId) {
   return Promise.all([
     db('projects_files')
       .select('*')
-      .whereIn('type', ['profile', 'villages', 'admin-bounds'])
-      .where('project_id', projId),
+      .whereIn('type', ['profile'])
+      .where('project_id', projId)
+      .first(),
     db('scenarios_files')
       .select('*')
-      .whereIn('type', ['poi', 'road-network'])
+      .whereIn('type', ['road-network'])
       .where('project_id', projId)
       .where('scenario_id', scId)
+      .first()
   ])
-  .then(files => {
-    // Merge scenario and project files and convert the files array
-    // into an object indexed by type.
-    let obj = {};
-    files
-      .reduce((acc, f) => acc.concat(f), [])
-      .forEach(o => (obj[o.type] = o));
-    return obj;
-  });
+  .then(files => ({
+    'profile': files[0],
+    'road-network': files[1]
+  }));
+}
+
+function fetchOrigins (projId) {
+  return db('projects_origins')
+    .select(
+      'projects_origins.id',
+      'projects_origins.name',
+      'projects_origins.coordinates',
+      'projects_origins_indicators.key',
+      'projects_origins_indicators.value'
+    )
+    .innerJoin('projects_origins_indicators', 'projects_origins.id', 'projects_origins_indicators.origin_id')
+    .where('project_id', projId)
+    .then(origins => {
+      // Group by indicators.
+      let indGroup = {};
+      origins.forEach(o => {
+        let hold = indGroup[o.id];
+        if (!hold) {
+          hold = {
+            id: o.id,
+            name: o.name,
+            coordinates: o.coordinates
+          };
+        }
+        hold[o.key] = o.value;
+        indGroup[o.id] = hold;
+      });
+
+      return {
+        type: 'FeatureCollection',
+        features: Object.keys(indGroup).map(k => {
+          let props = Object.assign({}, indGroup[k]);
+          delete props.coordinates;
+          return {
+            type: 'Feature',
+            properties: props,
+            geometry: {
+              type: 'Point',
+              coordinates: indGroup[k].coordinates
+            }
+          };
+        })
+      };
+
+      // Convert origins to featureCollection.
+      // TODO: Use this once the results are returned from the db.
+      // return {
+      //   type: 'FeatureCollection',
+      //   features: origins.map(o => ({
+      //     type: 'Feature',
+      //     properties: {
+      //       id: o.id,
+      //       name: o.name
+      //     },
+      //     geometry: {
+      //       type: 'Point',
+      //       coordinates: o.coordinates
+      //     }
+      //   }))
+      // };
+    });
+}
+
+function fetchPoi (projId, scId) {
+  return db('scenarios_files')
+    .select('*')
+    .where('type', 'poi')
+    .where('project_id', projId)
+    .where('scenario_id', scId)
+    .then(files => Promise.all(files.map(f => getJSONFileContents(f.path)))
+      .then(fileData => {
+        // Index pois by subtype.
+        let loaded = {};
+        files.forEach((file, idx) => {
+          loaded[file.subtype] = fileData[idx];
+        });
+
+        return loaded;
+      })
+    );
+}
+
+const arrayDepth = (arr) => Array.isArray(arr) ? arrayDepth(arr[0]) + 1 : 0;
+const getGeometryType = (geometry) => {
+  switch (arrayDepth(geometry)) {
+    case 3:
+      return 'Polygon';
+    case 4:
+      return 'MultiPolygon';
+    default:
+      throw new Error('Malformed coordinates array. Expected Polygon or MultiPolygon.');
+  }
+};
+
+function fetchAdminAreas (projId, scId) {
+  return db('scenarios_settings')
+    .select('value')
+    .where('key', 'admin_areas')
+    .where('scenario_id', scId)
+    .first()
+    .then(aa => JSON.parse(aa.value))
+    .then(selectedAA => {
+      // Get selected adminAreas.
+      return db('projects_aa')
+        .select('*')
+        .where('project_id', projId)
+        .whereIn('id', selectedAA)
+        .then(aa => {
+          // Convert admin areas to featureCollection.
+          return {
+            type: 'FeatureCollection',
+            features: aa.map(o => ({
+              type: 'Feature',
+              properties: {
+                id: o.id,
+                name: o.name,
+                type: o.type,
+                project_id: o.project_id
+              },
+              geometry: {
+                type: getGeometryType(o.geometry),
+                coordinates: o.geometry
+              }
+            }))
+          };
+        });
+    });
 }
 
 /**
@@ -269,7 +415,7 @@ function createTimeMatrixTask (data, osrmFile) {
       id: 2,
       poi: data.pois,
       gridSize: 30,
-      villages: data.villages,
+      origins: data.origins,
       osrmFile: osrmFile,
       maxTime: data.maxTime,
       maxSpeed: data.maxSpeed,
@@ -308,56 +454,62 @@ function createTimeMatrixTask (data, osrmFile) {
           // Build csv file.
           let result = msg.data;
 
+          let csv = null;
+          let json = null;
+
           if (!result.length) {
-            // Result may be empty if in the work area there are no villages.
+            // Result may be empty if in the work area there are no origins.
             taskLogger.log('No results returned');
-            return callback(null, {
-              adminArea: data.adminArea.properties,
-              csv: 'error\nThere are no results for this admin area',
-              json: {}
-            });
+            csv = 'error\nThere are no results for this admin area';
+            json = [];
+          } else {
+            taskLogger.log(`Results returned for ${result.length} origins`);
+
+            // Prepare the csv.
+            // To form the fields array for json2csv convert from:
+            // {
+            //  prop1: 'prop1',
+            //  prop2: 'prop2',
+            //  poi: {
+            //    poiName: 'poi-name'
+            //  },
+            //  nearest: 'nearest'
+            // }
+            // to
+            // [prop1, prop2, poi.poiName, nearest]
+            //
+            // Poi fields as paths for nested objects.
+            let poiFields = Object.keys(data.pois);
+            poiFields = poiFields.map(o => `poi.${o}`);
+
+            // Other fields, except poi
+            let fields = Object.keys(result[0]);
+            let poiIdx = fields.indexOf('poi');
+            poiIdx !== -1 && fields.splice(poiIdx, 1);
+
+            // Concat.
+            fields = fields.concat(poiFields);
+
+            csv = json2csv({ data: result, fields: fields });
+            json = result;
           }
-          taskLogger.log(`Results returned for ${result.length} villages`);
-
-          // Prepare the csv.
-          // To form the fields array for json2csv convert from:
-          // {
-          //  prop1: 'prop1',
-          //  prop2: 'prop2',
-          //  poi: {
-          //    poiName: 'poi-name'
-          //  },
-          //  nearest: 'nearest'
-          // }
-          // to
-          // [prop1, prop2, poi.poiName, nearest]
-          //
-          // Poi fields as paths for nested objects.
-          let poiFields = Object.keys(data.pois);
-          poiFields = poiFields.map(o => `poi.${o}`);
-
-          // Other fields, except poi
-          let fields = Object.keys(result[0]);
-          let poiIdx = fields.indexOf('poi');
-          poiIdx !== -1 && fields.splice(poiIdx, 1);
-
-          // Concat.
-          fields = fields.concat(poiFields);
-
-          let csv = json2csv({ data: result, fields: fields });
 
           const finish = () => {
             cETA.disconnect();
             return callback(null, {
               adminArea: data.adminArea.properties,
               csv,
-              json: result
+              json
             });
           };
 
           // Error or not, we finish the process.
-          operation.log(opCodes.OP_ROUTING_AREA, {message: 'Routing complete', adminArea: data.adminArea.properties.name})
-            .then(() => finish(), () => finish());
+          operation.log(opCodes.OP_ROUTING_AREA, {
+            message: 'Routing complete',
+            adminArea: data.adminArea.properties.name,
+            remaining: --totalAdminAreasToProcess
+          })
+          .then(() => finish(), () => finish());
 
           // break;
       }
