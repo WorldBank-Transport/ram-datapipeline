@@ -571,7 +571,7 @@ function saveScenarioFile (type, name, data, projId, scId) {
  * @return  {FeatureCollection}
  */
 function generateGeoJSON (data) {
-  // Concatenate the JSON objects for each admin area
+  // Flatten the results array
   let jsonResults = [].concat.apply([], data.map(o => o.json))
   return {
     type: 'FeatureCollection',
@@ -582,7 +582,7 @@ function generateGeoJSON (data) {
           id: r.id,
           name: r.name,
           pop: r.population,
-          eta: Math.floor(r.poi.pointOfInterest)
+          eta: r.poi
         },
         geometry: {
           type: 'Point',
