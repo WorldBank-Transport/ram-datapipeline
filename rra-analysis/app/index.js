@@ -101,18 +101,6 @@ operationExecutor
     .then(() => timeMatrixRunner)
     .then(adminAreasData => operation.log(opCodes.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasData));
 })
-.then(adminAreasData => {
-  let processedJson = adminAreasData.map(result => {
-    return {
-      id: result.adminArea.id,
-      name: result.adminArea.name,
-      results: result.json
-    };
-  });
-
-  return saveScenarioFile('results-all', 'all', processedJson, projId, scId)
-    .then(() => adminAreasData);
-})
 // DB storage.
 .then(adminAreasData => {
   let results = [];
@@ -158,10 +146,18 @@ operationExecutor
 // S3 storage.
 .then(adminAreasData => {
   logger.group('s3').log('Storing files');
-  let putFilesTasks = adminAreasData.map(o => saveScenarioFile('results', `${o.adminArea.id}-${kebabCase(o.adminArea.name)}`, o.csv, projId, scId));
+
+  // For each admin area, results are stored in a separate CSV file
+  let putCSVFilesTask = adminAreasData.map(o => saveScenarioFile('results-csv', `${o.adminArea.id}-${kebabCase(o.adminArea.name)}-csv`, o.csv, projId, scId));
+
+  // Generate a JSON file with all results
+  let putJSONFileTask = saveScenarioFile('results-json', 'all-json', generateJSON(adminAreasData), projId, scId);
+
+  // For all admin areas combined, results are stored in GeoJSON format
+  let putGeoJSONFileTask = saveScenarioFile('results-geojson', 'all-geojson', generateGeoJSON(adminAreasData), projId, scId);
 
   return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
-    .then(() => Promise.all(putFilesTasks))
+    .then(() => Promise.all([putCSVFilesTask, putJSONFileTask, putGeoJSONFileTask]))
     .then(() => operation.log(opCodes.OP_RESULTS, {message: 'Storing results complete'}))
     .then(() => {
       logger.group('s3').log('Storing files complete');
@@ -567,4 +563,47 @@ function saveScenarioFile (type, name, data, projId, scId) {
         .where('id', projId)
       )
     );
+}
+
+/**
+ * Generates a GeoJSON FeatureCollection from the results
+ * @param   {object} data   Object with data to store
+ * @return  {FeatureCollection}
+ */
+function generateGeoJSON (data) {
+  // Flatten the results array
+  let jsonResults = [].concat.apply([], data.map(o => o.json));
+  return {
+    type: 'FeatureCollection',
+    features: jsonResults.map(r => {
+      return {
+        type: 'Feature',
+        properties: {
+          id: r.id,
+          name: r.name,
+          pop: r.population,
+          eta: r.poi
+        },
+        geometry: {
+          type: 'Point',
+          coordinates: [r.lat, r.lon]
+        }
+      };
+    })
+  };
+}
+
+/**
+ * Generates a JSON file from the results
+ * @param   {object} data   Object with data to store
+ * @return  {object}
+ */
+function generateJSON (data) {
+  return data.map(o => {
+    return {
+      id: o.adminArea.id,
+      name: o.adminArea.name,
+      results: o.json
+    };
+  });
 }
