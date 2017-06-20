@@ -572,7 +572,7 @@ function saveScenarioFile (type, name, data, projId, scId) {
  */
 function generateGeoJSON (data) {
   // Flatten the results array
-  let jsonResults = [].concat.apply([], data.map(o => o.json))
+  let jsonResults = [].concat.apply([], data.map(o => o.json));
   return {
     type: 'FeatureCollection',
     features: jsonResults.map(r => {
@@ -591,7 +591,7 @@ function generateGeoJSON (data) {
       };
     })
   };
-};
+}
 
 /**
  * Generates a JSON file from the results
@@ -605,5 +605,5 @@ function generateJSON (data) {
       name: o.adminArea.name,
       results: o.json
     };
-  })
-};
+  });
+}
