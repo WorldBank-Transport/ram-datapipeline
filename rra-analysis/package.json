@@ -12,6 +12,7 @@
   "dependencies": {
     "@turf/bbox": "^4.4.0",
     "@turf/buffer": "^3.14.0",
+    "@turf/center-of-mass": "^4.4.0",
     "@turf/helpers": "^3.13.0",
     "@turf/intersect": "^3.14.0",
     "@turf/square-grid": "^3.14.0",
