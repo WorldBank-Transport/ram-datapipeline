@@ -1,6 +1,7 @@
 'use strict';
 import { range, originsInRegion, poisInBuffer } from './utils';
 import async from 'async';
+import centerOfMass from '@turf/center-of-mass';
 
 /**
  * Compute the time it takes for each village inside the given work area to
@@ -60,6 +61,13 @@ export function createProcessAreaTask (workArea, poiByType, origins, osrm, maxTi
       // We want to have at least 4 poi to work with, but we have to account
       // for the case where there are less than 4, as to avoid infinite loops.
       let totalPoi = poiByType[key].features.length;
+      // Ensure that all poi are points, otherwise calculate center.
+      poiByType[key].features = poiByType[key].features.map(feat => {
+        if (feat.geometry.type !== 'Point') {
+          feat.geometry = centerOfMass(feat).geometry;
+        }
+        return feat;
+      });
       let minPoi = Math.min(totalPoi, 4);
       process.send({type: 'debug', data: `Total poi of type ${key}: ${totalPoi}`, id: id});
       do {
