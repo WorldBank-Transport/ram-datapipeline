@@ -21,8 +21,6 @@ pwd
 OSRM_EXTRACT="$(realpath .)/node_modules/osrm/lib/binding/osrm-extract"
 OSRM_CONTRACT="$(realpath .)/node_modules/osrm/lib/binding/osrm-contract"
 
-echo $OSRM_EXTRACT;
-
 cd $DIR
 
 pwd

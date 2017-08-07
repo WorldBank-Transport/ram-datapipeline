@@ -2,7 +2,7 @@
 import OSRM from 'osrm';
 import async from 'async';
 import intersect from '@turf/intersect';
-import envelope from '@turf/envelope';
+import bbox from '@turf/bbox';
 import squareGrid from '@turf/square-grid';
 
 import config from '../config';
@@ -17,7 +17,7 @@ process.env.UV_THREADPOOL_SIZE = config.cpus;
  * @param  {Feature} adminArea Admin area to work with.
  * @param  {Object} poiByType  Object where each key represents a poi type and
  *                             the value is a FeatureCollection of points.
- * @param  {FeatureCollection} villages  Points representing villages
+ * @param  {FeatureCollection} origins  Points representing origins
  * @param  {String} osrmFile   Location of the osrm file.
  * @param  {number} gridSize   Size of the grip in km (default to 30)
  * @param  {number} maxTime    Value in seconds.
@@ -41,7 +41,7 @@ function init (e) {
   const {
     id,
     poi: poiByType,
-    villages,
+    origins,
     osrmFile,
     adminArea,
     gridSize,
@@ -53,8 +53,7 @@ function init (e) {
   process.send({type: 'status', data: 'srv_loaded_files', id: id});
 
   // Split the input region in squares for parallelisation.
-  let box = envelope(adminArea);
-  let extent = [box.geometry.coordinates[0][0][0], box.geometry.coordinates[0][0][1], box.geometry.coordinates[0][2][0], box.geometry.coordinates[0][2][1]];
+  let extent = bbox(adminArea);
   let squares = squareGrid(extent, gridSize || 30, 'kilometers').features;
   process.send({type: 'squarecount', data: squares.length, id: id});
 
@@ -63,7 +62,7 @@ function init (e) {
     // Clip the square with the input geometry. In this way we work with a
     // smaller area..
     let workArea = intersect(adminArea, square);
-    return createProcessAreaTask(workArea, poiByType, villages, osrm, maxTime, maxSpeed, id);
+    return createProcessAreaTask(workArea, poiByType, origins, osrm, maxTime, maxSpeed, id);
   });
 
   async.parallelLimit(squareTasks, config.cpus, (err, allSquaresRes) => {

@@ -2,6 +2,7 @@
 import { featureCollection } from '@turf/helpers';
 import within from '@turf/within';
 import buffer from '@turf/buffer';
+
 /**
  * Create an array filled with a range of numbers starting at {start} and ending
  * at {end - 1}
@@ -17,14 +18,14 @@ export function range (start, end) {
 }
 
 /**
- * Get all villages in the given area.
+ * Get all origins in the given area.
  * @param  {Feature} area
- * @param  {FeatureCollection} villages
+ * @param  {FeatureCollection} origins
  * @return {FeatureCollection}
- *   Villages in the given area
+ *   Origins in the given area
  */
-export function villagesInRegion (area, villages) {
-  let result = within(villages, featureCollection([area]));
+export function originsInRegion (area, origins) {
+  let result = within(origins, featureCollection([area]));
   return result;
 }
 
