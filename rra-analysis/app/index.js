@@ -393,7 +393,7 @@ function osm2osrmCleanup (dir) {
       'lib'
     ].map(g => `${dir}/${g}`).join(' ');
 
-    exec(`rm ${globs}`, (error, stdout, stderr) => {
+    exec(`rm -f ${globs}`, (error, stdout, stderr) => {
       if (error) return reject(new Error(stderr));
       return resolve(stdout);
     });
