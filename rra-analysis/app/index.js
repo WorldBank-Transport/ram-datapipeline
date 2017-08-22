@@ -550,8 +550,7 @@ function saveScenarioFile (type, name, data, projId, scId) {
   };
 
   logger.group('s3').log('Saving file', filePath);
-
-  let contents = type === 'results' ? data : JSON.stringify(data);
+  let contents = type === 'results-csv' ? data : JSON.stringify(data);
   return putFile(filePath, contents)
     .then(() => db('scenarios_files')
       .returning('*')
