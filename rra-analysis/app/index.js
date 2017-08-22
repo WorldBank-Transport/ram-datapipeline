@@ -585,7 +585,7 @@ function generateGeoJSON (data) {
         },
         geometry: {
           type: 'Point',
-          coordinates: [r.lat, r.lon]
+          coordinates: [r.lon, r.lat]
         }
       };
     })
