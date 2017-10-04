@@ -146,7 +146,7 @@ operationExecutor
 // S3 storage.
 .then(adminAreasData => {
   logger.group('s3').log('Storing files');
-
+  logger.group('s3').log(adminAreasData)
   // For each admin area, results are stored in a separate CSV file
   let putCSVFilesTask = adminAreasData.map(o => saveScenarioFile('results-csv', `${o.adminArea.id}-${kebabCase(o.adminArea.name)}-csv`, o.csv, projId, scId));
 
@@ -161,19 +161,7 @@ operationExecutor
     .then(() => operation.log(opCodes.OP_RESULTS, {message: 'Storing results complete'}))
     .then(() => {
       logger.group('s3').log('Storing files complete');
-      // Pass it along.
-      return adminAreasData;
     });
-})
-// File storage
-.then(adminAreasData => {
-  logger.log('Writing result CSVs');
-  adminAreasData.forEach(o => {
-    let name = `results--${o.adminArea.id}-${kebabCase(o.adminArea.name)}.csv`;
-    fs.writeFileSync(`${WORK_DIR}/${name}`, o.csv);
-  });
-
-  logger.log('Done writing result CSVs');
 })
 // Update generation time.
 .then(() => db('scenarios_settings')
