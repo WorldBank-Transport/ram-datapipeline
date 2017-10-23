@@ -146,7 +146,6 @@ operationExecutor
 // S3 storage.
 .then(adminAreasData => {
   logger.group('s3').log('Storing files');
-  logger.group('s3').log(adminAreasData)
   // For each admin area, results are stored in a separate CSV file
   let putCSVFilesTask = adminAreasData.map(o => saveScenarioFile('results-csv', `${o.adminArea.id}-${kebabCase(o.adminArea.name)}-csv`, o.csv, projId, scId));
 
@@ -563,19 +562,22 @@ function generateGeoJSON (data) {
   return {
     type: 'FeatureCollection',
     features: jsonResults.map(r => {
-      return {
+      let ft = {
         type: 'Feature',
         properties: {
           id: r.id,
           name: r.name,
           pop: r.population,
-          eta: r.poi
         },
         geometry: {
           type: 'Point',
           coordinates: [r.lon, r.lat]
         }
       };
+      for (let poiType in r.poi) {
+        ft.properties[`eta-${poiType}`] = r.poi[poiType]
+      }
+      return ft;
     })
   };
 }
