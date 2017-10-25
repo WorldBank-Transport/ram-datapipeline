@@ -567,7 +567,7 @@ function generateGeoJSON (data) {
         properties: {
           id: r.id,
           name: r.name,
-          pop: r.population,
+          pop: r.population
         },
         geometry: {
           type: 'Point',
@@ -575,7 +575,7 @@ function generateGeoJSON (data) {
         }
       };
       for (let poiType in r.poi) {
-        ft.properties[`eta-${poiType}`] = r.poi[poiType]
+        ft.properties[`eta-${poiType}`] = r.poi[poiType];
       }
       return ft;
     })
