@@ -22,3 +22,15 @@ RUN rm -rf /tmp/tippecanoe-src \
 
 # Install osmtogeojson
 RUN npm install -g osmtogeojson
+
+# Vt generation
+COPY . /code
+
+WORKDIR /code
+
+RUN yarn
+
+RUN mkdir /conversion
+
+### Create link for easy access
+RUN echo '#!/bin/bash' > /usr/local/bin/rra-vt; echo 'node /code/index.js' >> /usr/local/bin/rra-vt; chmod +x /usr/local/bin/rra-vt
