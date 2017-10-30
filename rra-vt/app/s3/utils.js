@@ -16,9 +16,9 @@ export function fGetFile (file, dest) {
 }
 
 // Put file.
-export function putFile (file, data) {
+export function putFile (name, filepath) {
   return new Promise((resolve, reject) => {
-    s3.putObject(bucket, file, data, (err, etag) => {
+    s3.fPutObject(bucket, name, filepath, 'application/octet-stream', (err, etag) => {
       if (err) {
         return reject(err);
       }
