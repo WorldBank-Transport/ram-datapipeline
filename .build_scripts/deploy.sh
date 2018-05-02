@@ -18,9 +18,13 @@ docker build -t rra-tools ./rra-tools
 echo "Building source image: rra-analysis"
 docker build -t rra-analysis ./rra-analysis
 
+# rra-vt depends on rra-tools
+echo "Building source image: rra-vt"
+docker build -t rra-vt ./rra-vt
+
 docker login -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWD"
 
-# Only rra-analysis makes its way to Docker Hub
+# rra-analysis makes its way to Docker Hub
 echo "Pushing image to Docker Hub:$TRAVIS_COMMIT"
 docker tag rra-analysis $DOCKER_ORG/rra-analysis:$TRAVIS_COMMIT
 docker push $DOCKER_ORG/rra-analysis:$TRAVIS_COMMIT
@@ -28,3 +32,12 @@ docker push $DOCKER_ORG/rra-analysis:$TRAVIS_COMMIT
 echo "Also pushing as :$LATEST_TAG"
 docker tag rra-analysis $DOCKER_ORG/rra-analysis:$LATEST_TAG
 docker push $DOCKER_ORG/rra-analysis:$LATEST_TAG
+
+# rra-vt makes its way to Docker Hub
+echo "Pushing image to Docker Hub:$TRAVIS_COMMIT"
+docker tag rra-vt $DOCKER_ORG/rra-vt:$TRAVIS_COMMIT
+docker push $DOCKER_ORG/rra-vt:$TRAVIS_COMMIT
+
+echo "Also pushing as :$LATEST_TAG"
+docker tag rra-vt $DOCKER_ORG/rra-vt:$LATEST_TAG
+docker push $DOCKER_ORG/rra-vt:$LATEST_TAG
