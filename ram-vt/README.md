@@ -1,25 +1,25 @@
-# RRA-VT
+# RAM Vector Tiles
 
-Dockerfile for the rra-vt
+Dockerfile for the ram-vt
 
 Contains:
 - `osmtogeojson` to convert `.xml` to `.geojson`
 - `tippecanoe` to create the vector tiles
-- `rra-vt` to create vector tiles from a file on s3 and upload them to s3.
+- `ram-vt` to create vector tiles from a file on s3 and upload them to s3.
 
 ### Standalone commands
 
 osmtogeojson
 ```
-docker run -it --rm -v $(pwd):/data wbtransport/rra-vt node --max_old_space_size=8192 /usr/local/bin/osmtogeojson /data/[input.xml] > [output.geojson]
+docker run -it --rm -v $(pwd):/data wbtransport/ram-vt node --max_old_space_size=8192 /usr/local/bin/osmtogeojson /data/[input.xml] > [output.geojson]
 ```
 
 tippecanoe
 ```
-docker run -it --rm -v $(pwd):/data wbtransport/rra-vt tippecanoe -l road-network -e /data/[output.mbtiles] [input.geojson]
+docker run -it --rm -v $(pwd):/data wbtransport/ram-vt tippecanoe -l road-network -e /data/[output.mbtiles] [input.geojson]
 ```
 
-### rra-vt
+### ram-vt
 
 Requires the following env variables:
 - PROJECT_ID - Id of the RAM project.

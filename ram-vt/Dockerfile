@@ -33,4 +33,4 @@ RUN yarn
 RUN mkdir /conversion
 
 ### Create link for easy access
-RUN echo '#!/bin/bash' > /usr/local/bin/rra-vt; echo 'node /code/index.js' >> /usr/local/bin/rra-vt; chmod +x /usr/local/bin/rra-vt
+RUN echo '#!/bin/bash' > /usr/local/bin/ram-vt; echo 'node /code/index.js' >> /usr/local/bin/ram-vt; chmod +x /usr/local/bin/ram-vt

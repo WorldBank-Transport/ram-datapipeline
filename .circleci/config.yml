@@ -1,0 +1,159 @@
+version: 2
+jobs:
+  deploy-stage:
+    docker:
+      - image: circleci/node:6
+    working_directory: ~/repo
+
+    environment:
+      - DOCKER_ORG: wbtransport
+
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - run:
+          name: Build base Docker image ram-tools
+          command: docker build -t ram-tools ./ram-tools
+
+      - run:
+          name: Build Docker image of ram-analysis
+          command: docker build -t ram-analysis ./ram-analysis
+
+      - run:
+          name: Build Docker image of ram-vt
+          command: docker build -t ram-vt ./ram-vt
+
+      - run:
+          name: Tag and push Docker images with latest-dev tag
+          command: |
+            docker login -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWD"
+
+            echo "Pushing ram-analysis to Docker Hub as :latest-dev"
+            docker tag ram-analysis ${DOCKER_ORG}/ram-analysis:latest-dev
+            docker push ${DOCKER_ORG}/ram-analysis:latest-dev
+
+            echo "Pushing ram-vt to Docker Hub as :latest-dev"
+            docker tag ram-vt ${DOCKER_ORG}/ram-vt:latest-dev
+            docker push ${DOCKER_ORG}/ram-vt:latest-dev
+
+  deploy-vt-prod:
+    docker: 
+      - image: circleci/node:6
+    working_directory: ~/repo
+
+    environment:
+      - DOCKER_IMAGE: ram-vt
+      - DOCKER_ORG: wbtransport
+
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - add_ssh_keys:
+          fingerprints:
+            - "91:6f:22:17:d4:4b:e3:4d:65:e0:27:fd:93:b1:de:cb"
+
+      - run:
+          name: Grab version and attempt to tag on Github
+          command: |
+            # Grab version from package.json and prepend with ram-vt-v (ram-vt-v0.5.0)
+            # Prepending it with the container is hacky, but needed because this
+            # repo holds and versions two containers.
+            VERSION=${DOCKER_IMAGE}-v$(grep -m1 version ram-vt/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+
+            # Attempt to add a git tag based on version in package.json. If
+            # the tag already exists, git will fail and stop the build.
+            if ! git tag ${VERSION} master
+            then
+              echo >&2 "Failed to tag a new release, skipping build. Did you update the version in package.json?"
+              exit 1
+            else
+              # Push tag to Github
+              git push origin ${VERSION}
+
+      - run:
+          name: Build base Docker image ram-tools
+          command: docker build -t ram-tools ./ram-tools
+
+      - run:
+          name: Build Docker image of ${DOCKER_IMAGE}
+          command: docker build -t ${DOCKER_IMAGE} ./ram-vt
+
+      - run:
+          name: Tag and push Docker image for ram-vt's stable version
+          command: |
+            docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
+
+            echo Pushing image to Docker Hub with ${VERSION} tag
+            docker tag ram-vt ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
+            docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
+
+  deploy-analysis-prod:
+    docker: 
+      - image: circleci/node:6
+    working_directory: ~/repo
+
+    environment:
+      - DOCKER_IMAGE: ram-analysis
+      - DOCKER_ORG: wbtransport
+
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - add_ssh_keys:
+          fingerprints:
+            - "91:6f:22:17:d4:4b:e3:4d:65:e0:27:fd:93:b1:de:cb"
+
+      - run:
+          name: Grab version and attempt to tag on Github
+          command: |
+            # Grab version from package.json and prepend with ram-analysis-v (ram-analysis-v0.5.0)
+            # Prepending it with the container is hacky, but needed because this
+            # repo holds and versions two containers.
+            VERSION=${DOCKER_IMAGE}-v$(grep -m1 version ram-vt/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+
+            # Attempt to add a git tag based on version in package.json. If
+            # the tag already exists, git will fail and stop the build.
+            if ! git tag ${VERSION} master
+            then
+              echo >&2 "Failed to tag a new release, skipping build. Did you update the version in package.json?"
+              exit 1
+            else
+              # Push tag to Github
+              git push origin ${VERSION}
+
+      - run:
+          name: Build base Docker image ram-tools
+          command: docker build -t ram-tools ./ram-tools
+
+      - run:
+          name: Build Docker image of ${DOCKER_IMAGE}
+          command: docker build -t ${DOCKER_IMAGE} ./ram-analysis
+
+      - run:
+          name: Tag and push Docker image for ${DOCKER_IMAGE}'s stable version
+          command: |
+            docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
+
+            echo Pushing image to Docker Hub with ${VERSION} tag
+            docker tag ram-vt ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
+            docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
+
+workflows:
+  version: 2
+  build-deploy:
+    jobs:
+      - deploy-stage:
+          filters:
+            branches:
+              only: develop
+      - deploy-vt-prod:
+          filters:
+            branches:
+              only: master
+      - deploy-analysis-prod:
+          filters:
+            branches:
+              only: master
