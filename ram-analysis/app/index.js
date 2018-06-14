@@ -4,7 +4,6 @@ import { exec, fork } from 'child_process';
 import fs from 'fs';
 import async from 'async';
 import json2csv from 'json2csv';
-import kebabCase from 'lodash.kebabcase';
 
 import config from './config';
 import { writeFile, getJSONFileContents, putFile } from './s3/utils';
@@ -147,33 +146,19 @@ operationExecutor
 .then(adminAreasData => {
   logger.group('s3').log('Storing files');
 
-  // For each admin area, results are stored in a separate CSV file
-  let putCSVFilesTask = adminAreasData.map(o => saveScenarioFile('results-csv', `${o.adminArea.id}-${kebabCase(o.adminArea.name)}-csv`, o.csv, projId, scId));
-
-  // Generate a JSON file with all results
-  let putJSONFileTask = saveScenarioFile('results-json', 'all-json', generateJSON(adminAreasData), projId, scId);
-
-  // For all admin areas combined, results are stored in GeoJSON format
-  let putGeoJSONFileTask = saveScenarioFile('results-geojson', 'all-geojson', generateGeoJSON(adminAreasData), projId, scId);
-
   return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
-    .then(() => Promise.all([putCSVFilesTask, putJSONFileTask, putGeoJSONFileTask]))
+    .then(() => Promise.all([
+      // Generate a csv with all the results.
+      saveScenarioFile('results-csv', 'all-csv', generateCSV(adminAreasData), projId, scId),
+      // Generate a JSON file with all results.
+      saveScenarioFile('results-json', 'all-json', generateJSON(adminAreasData), projId, scId),
+      // For all admin areas combined, results are stored in GeoJSON format.
+      saveScenarioFile('results-geojson', 'all-geojson', generateGeoJSON(adminAreasData), projId, scId)
+    ]))
     .then(() => operation.log(opCodes.OP_RESULTS, {message: 'Storing results complete'}))
     .then(() => {
       logger.group('s3').log('Storing files complete');
-      // Pass it along.
-      return adminAreasData;
     });
-})
-// File storage
-.then(adminAreasData => {
-  logger.log('Writing result CSVs');
-  adminAreasData.forEach(o => {
-    let name = `results--${o.adminArea.id}-${kebabCase(o.adminArea.name)}.csv`;
-    fs.writeFileSync(`${WORK_DIR}/${name}`, o.csv);
-  });
-
-  logger.log('Done writing result CSVs');
 })
 // Update generation time.
 .then(() => db('scenarios_settings')
@@ -447,46 +432,15 @@ function createTimeMatrixTask (data, osrmFile) {
         case 'done':
           let calculationTime = (Date.now() - beginTime) / 1000;
           taskLogger.log('Total routing time', calculationTime);
-          // Build csv file.
           let result = msg.data;
-
-          let csv = null;
           let json = null;
 
           if (!result.length) {
             // Result may be empty if in the work area there are no origins.
             taskLogger.log('No results returned');
-            csv = 'error\nThere are no results for this admin area';
             json = [];
           } else {
             taskLogger.log(`Results returned for ${result.length} origins`);
-
-            // Prepare the csv.
-            // To form the fields array for json2csv convert from:
-            // {
-            //  prop1: 'prop1',
-            //  prop2: 'prop2',
-            //  poi: {
-            //    poiName: 'poi-name'
-            //  },
-            //  nearest: 'nearest'
-            // }
-            // to
-            // [prop1, prop2, poi.poiName, nearest]
-            //
-            // Poi fields as paths for nested objects.
-            let poiFields = Object.keys(data.pois);
-            poiFields = poiFields.map(o => `poi.${o}`);
-
-            // Other fields, except poi
-            let fields = Object.keys(result[0]);
-            let poiIdx = fields.indexOf('poi');
-            poiIdx !== -1 && fields.splice(poiIdx, 1);
-
-            // Concat.
-            fields = fields.concat(poiFields);
-
-            csv = json2csv({ data: result, fields: fields });
             json = result;
           }
 
@@ -494,7 +448,6 @@ function createTimeMatrixTask (data, osrmFile) {
             cETA.disconnect();
             return callback(null, {
               adminArea: data.adminArea.properties,
-              csv,
               json
             });
           };
@@ -550,8 +503,7 @@ function saveScenarioFile (type, name, data, projId, scId) {
   };
 
   logger.group('s3').log('Saving file', filePath);
-
-  let contents = type === 'results' ? data : JSON.stringify(data);
+  let contents = typeof data === 'string' ? data : JSON.stringify(data);
   return putFile(filePath, contents)
     .then(() => db('scenarios_files')
       .returning('*')
@@ -576,19 +528,22 @@ function generateGeoJSON (data) {
   return {
     type: 'FeatureCollection',
     features: jsonResults.map(r => {
-      return {
+      let ft = {
         type: 'Feature',
         properties: {
           id: r.id,
           name: r.name,
-          pop: r.population,
-          eta: r.poi
+          pop: r.population
         },
         geometry: {
           type: 'Point',
-          coordinates: [r.lat, r.lon]
+          coordinates: [r.lon, r.lat]
         }
       };
+      for (let poiType in r.poi) {
+        ft.properties[`eta-${poiType}`] = r.poi[poiType];
+      }
+      return ft;
     })
   };
 }
@@ -606,4 +561,50 @@ function generateJSON (data) {
       results: o.json
     };
   });
+}
+
+/**
+ * Generates a CSV file from the results
+ * @param   {object} data   Object with data to store
+ * @return  {string}
+ */
+function generateCSV (data) {
+  // Merge all the results together.
+  let results = data.reduce((acc, o) => {
+    if (o.json.length) {
+      let items = o.json.map(item => {
+        item['admin_area'] = o.adminArea.name;
+        return item;
+      });
+      return acc.concat(items);
+    }
+    return acc;
+  }, []);
+
+  if (!results.length) {
+    return 'The analysis didn\'t produce any results';
+  }
+
+  // Prepare the csv.
+  // To form the fields array for json2csv convert from:
+  // {
+  //  prop1: 'prop1',
+  //  prop2: 'prop2',
+  //  poi: {
+  //    poiName: 'poi-name'
+  //  },
+  //  prop3: 'prop3'
+  // }
+  // to
+  // [prop1, prop2, prop3, poi.poiName]
+  //
+  // Poi fields as paths for nested objects.
+  let poiFields = Object.keys(results[0].poi).map(o => `poi.${o}`);
+
+  // Get other fields, exclude poi and include new poi.
+  let fields = Object.keys(results[0])
+    .filter(o => o !== 'poi')
+    .concat(poiFields);
+
+  return json2csv({ data: results, fields: fields });
 }

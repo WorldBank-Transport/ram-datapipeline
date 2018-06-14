@@ -15,7 +15,7 @@ then
   echo "disk=/var/tmp/stxxl,2500,memory" > ./conversion/.stxxl
   ln -s ../node_modules/osrm/profiles/lib/ ./conversion/lib
 
-  export 'DB_URI=postgresql://rra:rra@172.17.0.1:5432/rra'
+  export 'DB_URI=postgresql://ram:ram@172.17.0.1:5432/ram'
   export "PROJECT_ID=$PROJECT_ID"
   export "SCENARIO_ID=$SCENARIO_ID"
   export 'STORAGE_HOST=172.17.0.1'
@@ -23,7 +23,7 @@ then
   export 'STORAGE_ENGINE=minio'
   export 'STORAGE_ACCESS_KEY=minio'
   export 'STORAGE_SECRET_KEY=miniostorageengine'
-  export 'STORAGE_BUCKET=rra'
+  export 'STORAGE_BUCKET=ram'
   export 'STORAGE_REGION=us-east-1'
   export 'CONVERSION_DIR=./conversion'
 
