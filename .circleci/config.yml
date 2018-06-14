@@ -71,6 +71,7 @@ jobs:
             else
               # Push tag to Github
               git push origin ${VERSION}
+            fi
 
       - run:
           name: Build base Docker image ram-tools
@@ -86,7 +87,7 @@ jobs:
             docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
 
             echo Pushing image to Docker Hub with ${VERSION} tag
-            docker tag ram-vt ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
+            docker tag ${DOCKER_IMAGE} ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
             docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
 
   deploy-analysis-prod:
@@ -112,7 +113,7 @@ jobs:
             # Grab version from package.json and prepend with ram-analysis-v (ram-analysis-v0.5.0)
             # Prepending it with the container is hacky, but needed because this
             # repo holds and versions two containers.
-            VERSION=${DOCKER_IMAGE}-v$(grep -m1 version ram-vt/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+            VERSION=${DOCKER_IMAGE}-v$(grep -m1 version ram-analysis/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
 
             # Attempt to add a git tag based on version in package.json. If
             # the tag already exists, git will fail and stop the build.
@@ -123,6 +124,7 @@ jobs:
             else
               # Push tag to Github
               git push origin ${VERSION}
+            fi
 
       - run:
           name: Build base Docker image ram-tools
@@ -138,7 +140,7 @@ jobs:
             docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
 
             echo Pushing image to Docker Hub with ${VERSION} tag
-            docker tag ram-vt ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
+            docker tag ${DOCKER_IMAGE} ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
             docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
 
 workflows:
