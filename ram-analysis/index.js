@@ -18,7 +18,7 @@ var missing = [
 ].filter(v => !process.env[v]);
 
 if (missing.length) {
-  throw new Error(`Missing env vars on rra-analysis: ${missing.join(', ')}`);
+  throw new Error(`Missing env vars on ram-analysis: ${missing.join(', ')}`);
   process.exit(1);
 }
 

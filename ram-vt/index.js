@@ -19,7 +19,7 @@ var missing = [
 ].filter(v => !process.env[v]);
 
 if (missing.length) {
-  throw new Error(`Missing env vars on rra-vt: ${missing.join(', ')}`);
+  throw new Error(`Missing env vars on ram-vt: ${missing.join(', ')}`);
 }
 
 if (['road-network', 'admin-bounds'].indexOf(process.env['VT_TYPE']) === -1) {
