@@ -10,7 +10,8 @@ jobs:
 
     steps:
       - checkout
-      - setup_remote_docker
+      - setup_remote_docker:
+          docker_layer_caching: true
 
       - run:
           name: Build base Docker image ram-tools
@@ -48,7 +49,8 @@ jobs:
 
     steps:
       - checkout
-      - setup_remote_docker
+      - setup_remote_docker:
+          docker_layer_caching: true
 
       - add_ssh_keys:
           fingerprints:
@@ -84,6 +86,9 @@ jobs:
       - run:
           name: Tag and push Docker image for ram-vt's stable version
           command: |
+            # Grab version from package.json and prepend with ram-analysis-v (ram-analysis-v0.5.0)
+            VERSION=v$(grep -m1 version ram-vt/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+
             docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
 
             echo Pushing image to Docker Hub with ${VERSION} tag
@@ -101,7 +106,8 @@ jobs:
 
     steps:
       - checkout
-      - setup_remote_docker
+      - setup_remote_docker:
+          docker_layer_caching: true
 
       - add_ssh_keys:
           fingerprints:
@@ -137,6 +143,9 @@ jobs:
       - run:
           name: Tag and push Docker image for ${DOCKER_IMAGE}'s stable version
           command: |
+            # Grab version from package.json and prepend with ram-analysis-v (ram-analysis-v0.5.0)
+            VERSION=v$(grep -m1 version ram-analysis/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+
             docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
 
             echo Pushing image to Docker Hub with ${VERSION} tag
