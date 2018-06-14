@@ -1,0 +1,135 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/node:6
+
+    working_directory: ~/repo
+
+    environment:
+      - DOCKER_IMAGE_ANALYSIS: ram-analysis
+      - DOCKER_IMAGE_VT: ram-vt
+      - DOCKER_ORG: wbtransport
+
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - add_ssh_keys:
+          fingerprints:
+            - "91:6f:22:17:d4:4b:e3:4d:65:e0:27:fd:93:b1:de:cb"
+
+  deploy-stage:
+    docker:
+      - image: circleci/node:6
+    working_directory: ~/repo
+    steps:
+      - run:
+          name: Build Docker image for dev version
+          command: |
+            echo "Build the image: ram-tools"
+            docker build -t ram-tools ./ram-tools
+
+            # ram-analysis depends on ram-tools
+            echo "Building source image: ram-analysis"
+            docker build -t {DOCKER_IMAGE_ANALYSIS} ./ram-analysis
+
+            # ram-vt depends on ram-tools
+            echo "Building source image: ram-vt"
+            docker build -t {DOCKER_IMAGE_VT} ./ram-vt
+
+            docker login -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWD"
+
+            echo "Pushing ram-analysis to Docker Hub as :latest-dev"
+            docker tag ${DOCKER_IMAGE_ANALYSIS} ${DOCKER_ORG}/${DOCKER_IMAGE_ANALYSIS}:latest-dev
+            docker push ${DOCKER_ORG}/${DOCKER_IMAGE_ANALYSIS}:latest-dev
+
+            echo "Pushing ram-vt to Docker Hub as :latest-dev"
+            docker tag ${DOCKER_IMAGE_VT} ${DOCKER_ORG}/${DOCKER_IMAGE_VT}:latest-dev
+            docker push ${DOCKER_ORG}/${DOCKER_IMAGE_VT}:latest-dev
+
+  deploy-vt-prod:
+    docker: 
+      - image: circleci/node:6
+    working_directory: ~/repo/ram-vt
+    steps:
+      - run:
+          name: Build Docker image for stable version
+          command: |
+            # Grab version from package.json and prepend with v (v0.5.0)
+            VERSION=v$(grep -m1 version package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+            
+            # Attempt to add a git tag based on version in package.json. If
+            # the tag already exists, git will fail and stop the build.
+            if ! git tag ${VERSION} master
+            then
+              echo >&2 "Failed to tag a new release, skipping build. Did you update the version in package.json?"
+            else
+              # Push tag to Github
+              git push origin ${VERSION}
+
+              echo "Build the image: ram-tools"
+              docker build -t ram-tools ../ram-tools
+
+              # ram-vt depends on ram-tools
+              echo "Building source image: ram-vt"
+              docker build -t {DOCKER_IMAGE_VT} .
+
+              docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
+
+              echo Pushing image to Docker Hub with ${VERSION} tag
+              docker tag ${DOCKER_IMAGE_VT} ${DOCKER_ORG}/${DOCKER_IMAGE_VT}:${VERSION}
+              docker push ${DOCKER_ORG}/${DOCKER_IMAGE_VT}:${VERSION}
+            fi
+
+  deploy-analysis-prod:
+    docker: 
+      - image: circleci/node:6
+    working_directory: ~/repo/ram-analysis
+    steps:
+      - run:
+          name: Build Docker image for stable version
+          command: |
+            # Grab version from package.json and prepend with v (v0.5.0)
+            VERSION=v$(grep -m1 version package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+            
+            # Attempt to add a git tag based on version in package.json. If
+            # the tag already exists, git will fail and stop the build.
+            if ! git tag ${VERSION} master
+            then
+              echo >&2 "Failed to tag a new release, skipping build. Did you update the version in package.json?"
+            else
+              # Push tag to Github
+              git push origin ${VERSION}
+
+              echo "Build the image: ram-tools"
+              docker build -t ram-tools ../ram-tools
+
+              # ram-analysis depends on ram-tools
+              echo "Building source image: ram-analysis"
+              docker build -t {DOCKER_IMAGE_ANALYSIS} .
+
+              docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
+
+              echo Pushing image to Docker Hub with ${VERSION} tag
+              docker tag ${DOCKER_IMAGE_ANALYSIS} ${DOCKER_ORG}/${DOCKER_IMAGE_ANALYSIS}:${VERSION}
+              docker push ${DOCKER_ORG}/${DOCKER_IMAGE_ANALYSIS}:${VERSION}
+            fi
+
+workflows:
+  version: 2
+  build-deploy:
+    jobs:
+      - build
+      - deploy-stage:
+          filters:
+            branches:
+              only: develop
+      - deploy-vt-prod:
+          filters:
+            branches:
+              only: master
+      - deploy-analysis-prod:
+          filters:
+            branches:
+              only: master
