@@ -80,13 +80,13 @@ jobs:
           command: docker build -t ram-tools ./ram-tools
 
       - run:
-          name: Build Docker image of ${DOCKER_IMAGE}
+          name: Build Docker image of ram-vt
           command: docker build -t ${DOCKER_IMAGE} ./ram-vt
 
       - run:
           name: Tag and push Docker image for ram-vt's stable version
           command: |
-            # Grab version from package.json and prepend with ram-analysis-v (ram-analysis-v0.5.0)
+            # Grab version from package.json and prepend with ram-vt-v (ram-vt-v0.5.0)
             VERSION=v$(grep -m1 version ram-vt/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
 
             docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWD
@@ -137,11 +137,11 @@ jobs:
           command: docker build -t ram-tools ./ram-tools
 
       - run:
-          name: Build Docker image of ${DOCKER_IMAGE}
+          name: Build Docker image of ram-analysis
           command: docker build -t ${DOCKER_IMAGE} ./ram-analysis
 
       - run:
-          name: Tag and push Docker image for ${DOCKER_IMAGE}'s stable version
+          name: Tag and push Docker image for ram-analysis stable version
           command: |
             # Grab version from package.json and prepend with ram-analysis-v (ram-analysis-v0.5.0)
             VERSION=v$(grep -m1 version ram-analysis/package.json | awk -F: '{ print $2 }' | sed 's/[", ]//g')
