@@ -173,7 +173,7 @@ operationExecutor
 .then(() => process.exit(0))
 .catch(err => {
   console.log('err', err);
-  let eGroup = logger.group('error');
+  let eGroup = logger.group('fatal-error');
   if (err.message) {
     eGroup.log(err.message);
     eGroup.log(err.stack);
@@ -183,7 +183,10 @@ operationExecutor
   logger.toFile(`${WORK_DIR}/process.log`);
   operation.log(opCodes.OP_ERROR, {error: err.message || err})
     .then(() => operation.finish())
-    .then(() => process.exit(1), () => process.exit(1));
+    .then(() => process.exit(1))
+    // If it errors again exit.
+    // This is especially important in the case of DB errors.
+    .catch(() => process.exit(1));
 });
 
 //
