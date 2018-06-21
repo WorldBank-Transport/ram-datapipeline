@@ -24,7 +24,9 @@ switch (STORAGE_ENGINE) {
     break;
   case 's3':
     minioClient = new Minio.Client({
+      // Endpoint gets updated based on region.
       endPoint: 's3.amazonaws.com',
+      region: STORAGE_REGION,
       accessKey: STORAGE_ACCESS_KEY,
       secretKey: STORAGE_SECRET_KEY
     });
