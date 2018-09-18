@@ -2,7 +2,7 @@ version: 2
 jobs:
   deploy-stage:
     docker:
-      - image: circleci/node:6
+      - image: circleci/node:8
     working_directory: ~/repo
 
     environment:
@@ -40,7 +40,7 @@ jobs:
 
   deploy-vt-prod:
     docker: 
-      - image: circleci/node:6
+      - image: circleci/node:8
     working_directory: ~/repo
 
     environment:
@@ -97,7 +97,7 @@ jobs:
 
   deploy-analysis-prod:
     docker: 
-      - image: circleci/node:6
+      - image: circleci/node:8
     working_directory: ~/repo
 
     environment:
