@@ -1,5 +1,5 @@
 # Start from ubuntu
-FROM node:6
+FROM node:8
 
 # Update repos and install dependencies
 RUN apt-get update \

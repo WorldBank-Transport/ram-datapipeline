@@ -8,7 +8,7 @@ libbz2-dev libstxxl-dev libstxxl1v5 libxml2-dev \
 libzip-dev libboost-all-dev lua5.2 liblua5.2-dev libtbb-dev libluabind-dev
 
 curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.33.1/install.sh | bash
-\. "/root/.nvm/nvm.sh" && nvm install 6
+\. "/root/.nvm/nvm.sh" && nvm install 8
 
 # Make node available for everyone
 # https://www.digitalocean.com/community/tutorials/how-to-install-node-js-with-nvm-node-version-manager-on-a-vps
