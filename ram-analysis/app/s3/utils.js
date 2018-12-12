@@ -2,9 +2,9 @@
 import S3, { bucket } from './';
 
 // Proxy of removeObject function, assuming the bucket.
-export function removeFile (file) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function removeFile (file) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.removeObject(bucket, file, err => {
       if (err) {
         return reject(err);
@@ -15,9 +15,9 @@ export function removeFile (file) {
 }
 
 // Get file.
-export function getFile (file) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function getFile (file) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.getObject(bucket, file, (err, dataStream) => {
       if (err) {
         return reject(err);
@@ -28,9 +28,9 @@ export function getFile (file) {
 }
 
 // Get file content.
-export function getFileContents (file) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function getFileContents (file) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.getObject(bucket, file, (err, dataStream) => {
       if (err) return reject(err);
 
@@ -49,9 +49,9 @@ export async function getJSONFileContents (file) {
 }
 
 // Get file and write to disk.
-export function writeFile (file, destination) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function writeFile (file, destination) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.fGetObject(bucket, file, destination, err => {
       if (err) {
         return reject(err);
@@ -62,9 +62,9 @@ export function writeFile (file, destination) {
 }
 
 // Put file.
-export function putFile (file, data) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function putFile (file, data) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.putObject(bucket, file, data, (err, etag) => {
       if (err) {
         return reject(err);

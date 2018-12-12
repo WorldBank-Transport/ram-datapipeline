@@ -4,9 +4,9 @@ import Promise from 'bluebird';
 import S3, { bucket } from './';
 
 // Get s3 file to file.
-export function fGetFile (file, dest) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function fGetFile (file, dest) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.fGetObject(bucket, file, dest, (err) => {
       if (err) {
         return reject(err);
@@ -17,9 +17,9 @@ export function fGetFile (file, dest) {
 }
 
 // Put file.
-export function putFile (name, filepath) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function putFile (name, filepath) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.fPutObject(bucket, name, filepath, 'application/octet-stream', (err, etag) => {
       if (err) {
         return reject(err);
@@ -29,10 +29,10 @@ export function putFile (name, filepath) {
   });
 }
 
-export function listObjects (bucket, objPrefix = '') {
-  return new Promise(async (resolve, reject) => {
+export async function listObjects (bucket, objPrefix = '') {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     var objects = [];
-    const s3 = await S3();
     var stream = s3.listObjectsV2(bucket, objPrefix, true);
     stream.on('data', obj => {
       objects.push(obj);
@@ -46,9 +46,9 @@ export function listObjects (bucket, objPrefix = '') {
   });
 }
 
-export function removeObject (bucket, name) {
-  return new Promise(async (resolve, reject) => {
-    const s3 = await S3();
+export async function removeObject (bucket, name) {
+  const s3 = await S3();
+  return new Promise((resolve, reject) => {
     s3.removeObject(bucket, name, err => {
       if (err) {
         return reject(err);
@@ -58,15 +58,17 @@ export function removeObject (bucket, name) {
   });
 }
 
-export function removeDir (dir) {
-  return listObjects(bucket, dir)
-    .catch(err => {
-      if (err.code === 'NoSuchBucket') {
-        return [];
-      }
-      throw err;
-    })
-    .then(objects => Promise.map(objects, o => removeObject(bucket, o.name), { concurrency: 10 }));
+export async function removeDir (dir) {
+  let objects = [];
+  try {
+    objects = await listObjects(bucket, dir);
+  } catch (err) {
+    if (err.code === 'NoSuchBucket') {
+      return [];
+    }
+    throw err;
+  }
+  return Promise.map(objects, o => removeObject(bucket, o.name), { concurrency: 10 });
 }
 
 // Put directory

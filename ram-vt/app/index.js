@@ -63,7 +63,7 @@ async function stepCleanUp () {
   logger.log('Clean files...');
   await Promise.all([
     emptyDir(WORK_DIR),
-    // Clean S3 directory
+    // Clean S3 directory.
     removeS3Dir(`scenario-${scId}/tiles/${vtType}`)
   ]);
   logger.log('Clean files... done');
