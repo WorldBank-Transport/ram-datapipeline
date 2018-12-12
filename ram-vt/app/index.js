@@ -24,14 +24,6 @@ const WORK_DIR = path.resolve(CONVERSION_DIR, `p${projId}s${scId}`);
 const DEBUG = config.debug;
 const logger = AppLogger({ output: DEBUG });
 
-try {
-  fs.mkdirSync(WORK_DIR);
-} catch (e) {
-  if (e.code !== 'EEXIST') {
-    throw e;
-  }
-}
-
 // Promisify functions.
 const emptyDir = Promise.promisify(fs.emptyDir);
 
@@ -40,54 +32,69 @@ const tilesFolderName = `p${projId}s${scId}-${vtType}-tiles`;
 const geojsonFilePath = path.resolve(WORK_DIR, geojsonName);
 const tilesFolderPath = path.resolve(WORK_DIR, tilesFolderName);
 
-  // Clean up phase.
-stepCleanUp()
-  // From storage to geoJSON.
-  .then(() => stepToGeoJSON(sourceFile, geojsonFilePath))
-  // From the geoJSON to vector tiles.
-  .then(() => stepVectorTiles(geojsonFilePath, tilesFolderPath, vtType))
-  // Upload result.
-  .then(() => stepUploadStorage(tilesFolderPath, vtType));
+async function main () {
+  try {
+    try {
+      await fs.mkdir(WORK_DIR);
+    } catch (e) {
+      if (e.code !== 'EEXIST') {
+        throw e;
+      }
+    }
+    // Clean up phase.
+    await stepCleanUp();
+    // From storage to geoJSON.
+    await stepToGeoJSON(sourceFile, geojsonFilePath);
+    // From the geoJSON to vector tiles.
+    await stepVectorTiles(geojsonFilePath, tilesFolderPath, vtType);
+    // Upload result.
+    await stepUploadStorage(tilesFolderPath, vtType);
+  } catch (error) {
+    console.log('error', error);
+    process.exit(1);
+  }
+}
+
+// GO
+main();
 
 // Remove files from s3 and local if they exist.
-function stepCleanUp () {
+async function stepCleanUp () {
   logger.log('Clean files...');
-  return Promise.all([
+  await Promise.all([
     emptyDir(WORK_DIR),
     // Clean S3 directory
     removeS3Dir(`scenario-${scId}/tiles/${vtType}`)
-  ])
-  .then(() => logger.log('Clean files... done'));
+  ]);
+  logger.log('Clean files... done');
 }
 
-function stepToGeoJSON (source, destGeoJSON) {
-  const osmName = `p${projId}s${scId}-${vtType}.osm`;
-  const osmFilePath = path.resolve(WORK_DIR, osmName);
-
+async function stepToGeoJSON (source, destGeoJSON) {
   switch (vtType) {
     case 'road-network':
       logger.log('Downloading/Converting rn to geoJSON...');
+      const osmName = `p${projId}s${scId}-${vtType}.osm`;
+      const osmFilePath = path.resolve(WORK_DIR, osmName);
       // Download osm file.
-      return fGetFile(source, osmFilePath)
-        .then(() => osmToGeoJSON(osmFilePath, destGeoJSON))
-        .then(() => destGeoJSON)
-        .then(() => logger.log('Downloading/Converting rn to geoJSON... done'));
+      await fGetFile(source, osmFilePath);
+      await osmToGeoJSON(osmFilePath, destGeoJSON);
+      logger.log('Downloading/Converting rn to geoJSON... done');
+      break;
     case 'admin-bounds':
       logger.log('Downloading admin-bounds...');
       // The data is already in geoJSON format.
       // Download from S3.
-      return fGetFile(source, destGeoJSON)
-      .then(() => destGeoJSON)
-      .then(() => logger.log('Downloading admin-bounds... done'));
+      await fGetFile(source, destGeoJSON);
+      logger.log('Downloading admin-bounds... done');
+      break;
   }
 }
 
-function stepVectorTiles (sourceGeoJSON, destTiles, vtType) {
-  return generateVT(sourceGeoJSON, destTiles, vtType)
-    .then(() => destTiles);
+async function stepVectorTiles (sourceGeoJSON, destTiles, vtType) {
+  await generateVT(sourceGeoJSON, destTiles, vtType);
 }
 
-function stepUploadStorage (sourceTiles, vtType) {
+async function stepUploadStorage (sourceTiles, vtType) {
   logger.log('Uploading tiles to s3...');
   let dest;
   switch (vtType) {
@@ -99,8 +106,8 @@ function stepUploadStorage (sourceTiles, vtType) {
       break;
   }
 
-  return putS3Dir(sourceTiles, dest)
-    .then(() => logger.log('Uploading tiles to s3... done'));
+  await putS3Dir(sourceTiles, dest);
+  logger.log('Uploading tiles to s3... done');
 }
 
 /**
