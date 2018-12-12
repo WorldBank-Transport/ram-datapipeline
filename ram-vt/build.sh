@@ -1,3 +1,3 @@
 #!/bin/bash
 
-npm run lint && docker build -t ram-vt .
+yarn run lint && docker build -t ram-vt .
