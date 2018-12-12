@@ -3,7 +3,7 @@ import * as Minio from 'minio';
 import Http from 'http';
 import Https from 'https';
 
-import getAWSInstanceCredentials from '../utils/aws';
+import { getAWSInstanceCredentials } from '../utils/aws';
 
 const {
   STORAGE_HOST,
