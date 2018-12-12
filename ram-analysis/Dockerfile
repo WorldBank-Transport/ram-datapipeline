@@ -4,7 +4,7 @@ COPY . /code
 
 WORKDIR /code
 
-RUN npm install
+RUN yarn
 
 RUN mkdir /conversion && cd /conversion && echo "disk=/var/tmp/stxxl,2500,memory" > .stxxl && ln -s /code/node_modules/osrm/profiles/lib/ .
 
