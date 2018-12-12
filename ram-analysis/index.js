@@ -6,8 +6,6 @@ const globalVars = [
   'DB_URI',
   'PROJECT_ID',
   'SCENARIO_ID',
-  'STORAGE_HOST',
-  'STORAGE_PORT',
   'STORAGE_ENGINE',
   'STORAGE_BUCKET',
   'STORAGE_REGION'
@@ -19,6 +17,8 @@ if (globalVars.length) {
 
 if (process.env['STORAGE_ENGINE'] === 'minio') {
   let missing = [
+    'STORAGE_HOST',
+    'STORAGE_PORT',
     'STORAGE_ACCESS_KEY',
     'STORAGE_SECRET_KEY'
   ].filter(v => !process.env[v]);

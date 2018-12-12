@@ -7,8 +7,6 @@ const globalVars = [
   'SCENARIO_ID',
   'VT_TYPE',
   'SOURCE_FILE',
-  'STORAGE_HOST',
-  'STORAGE_PORT',
   'STORAGE_ENGINE',
   'STORAGE_BUCKET',
   'STORAGE_REGION'
@@ -20,6 +18,8 @@ if (globalVars.length) {
 
 if (process.env['STORAGE_ENGINE'] === 'minio') {
   let missing = [
+    'STORAGE_HOST',
+    'STORAGE_PORT',
     'STORAGE_ACCESS_KEY',
     'STORAGE_SECRET_KEY'
   ].filter(v => !process.env[v]);
