@@ -1,5 +1,5 @@
 // only ES5 is allowed in this file
-require('babel-register')();
+require('@babel/register')();
 
 // Perform check of env variables.
 const globalVars = [

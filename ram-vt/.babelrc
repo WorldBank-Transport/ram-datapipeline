@@ -1,8 +1,15 @@
 {
- "presets": [ "es2015" ],
- "plugins": [
-    ["transform-object-rest-spread", { "useBuiltIns": true }]
+  "presets": [
+      [
+        "@babel/preset-env",
+        {
+          "targets": {
+            "node": "current"
+          }
+        }
+      ]
   ],
-  "sourceMaps": "inline",
-  "retainLines": true
+  "plugins": [],
+    "sourceMaps": "inline",
+    "retainLines": true
 }
