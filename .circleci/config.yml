@@ -95,6 +95,10 @@ jobs:
             docker tag ${DOCKER_IMAGE} ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
             docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
 
+            echo Pushing image to Docker Hub with latest tag
+            docker tag ${DOCKER_IMAGE} ${DOCKER_ORG}/${DOCKER_IMAGE}:latest
+            docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:latest
+
   deploy-analysis-prod:
     docker: 
       - image: circleci/node:6
@@ -151,6 +155,10 @@ jobs:
             echo Pushing image to Docker Hub with ${VERSION} tag
             docker tag ${DOCKER_IMAGE} ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
             docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:${VERSION}
+
+            echo Pushing image to Docker Hub with latest tag
+            docker tag ${DOCKER_IMAGE} ${DOCKER_ORG}/${DOCKER_IMAGE}:latest
+            docker push ${DOCKER_ORG}/${DOCKER_IMAGE}:latest
 
 workflows:
   version: 2

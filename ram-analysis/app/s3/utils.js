@@ -1,8 +1,9 @@
 'use strict';
-import s3, { bucket } from './';
+import S3, { bucket } from './';
 
 // Proxy of removeObject function, assuming the bucket.
-export function removeFile (file) {
+export async function removeFile (file) {
+  const s3 = await S3();
   return new Promise((resolve, reject) => {
     s3.removeObject(bucket, file, err => {
       if (err) {
@@ -14,7 +15,8 @@ export function removeFile (file) {
 }
 
 // Get file.
-export function getFile (file) {
+export async function getFile (file) {
+  const s3 = await S3();
   return new Promise((resolve, reject) => {
     s3.getObject(bucket, file, (err, dataStream) => {
       if (err) {
@@ -26,7 +28,8 @@ export function getFile (file) {
 }
 
 // Get file content.
-export function getFileContents (file) {
+export async function getFileContents (file) {
+  const s3 = await S3();
   return new Promise((resolve, reject) => {
     s3.getObject(bucket, file, (err, dataStream) => {
       if (err) return reject(err);
@@ -40,19 +43,14 @@ export function getFileContents (file) {
 }
 
 // Get file content in JSON.
-export function getJSONFileContents (file) {
-  return getFileContents(file)
-    .then(result => {
-      try {
-        return JSON.parse(result);
-      } catch (e) {
-        Promise.reject(e);
-      }
-    });
+export async function getJSONFileContents (file) {
+  const result = await getFileContents(file);
+  return JSON.parse(result);
 }
 
 // Get file and write to disk.
-export function writeFile (file, destination) {
+export async function writeFile (file, destination) {
+  const s3 = await S3();
   return new Promise((resolve, reject) => {
     s3.fGetObject(bucket, file, destination, err => {
       if (err) {
@@ -64,7 +62,8 @@ export function writeFile (file, destination) {
 }
 
 // Put file.
-export function putFile (file, data) {
+export async function putFile (file, data) {
+  const s3 = await S3();
   return new Promise((resolve, reject) => {
     s3.putObject(bucket, file, data, (err, etag) => {
       if (err) {
