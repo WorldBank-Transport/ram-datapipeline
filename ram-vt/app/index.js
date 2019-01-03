@@ -141,7 +141,7 @@ function generateVT (sourceGeoJSON, distDir, layerName) {
   return new Promise((resolve, reject) => {
     logger.group('generateVT').log('Generation started');
     let time = Date.now();
-    exec(`${config.tippecanoe} -l ${layerName} -e ${distDir} ${sourceGeoJSON}`, (error, stdout, stderr) => {
+    exec(`${config.tippecanoe} -l ${layerName} -e ${distDir} -zg --drop-densest-as-needed ${sourceGeoJSON}`, (error, stdout, stderr) => {
       if (error) return reject(new Error(stderr));
       logger.group('generateVT').log('Completed in', (Date.now() - time) / 1000, 'seconds');
       return resolve(stdout);
