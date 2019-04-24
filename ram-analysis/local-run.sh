@@ -27,5 +27,5 @@ then
   export 'STORAGE_REGION=us-east-1'
   export 'CONVERSION_DIR=./conversion'
 
-  node index.js
+  node --max_old_space_size=8192 index.js
 fi
