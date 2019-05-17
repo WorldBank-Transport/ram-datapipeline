@@ -172,11 +172,11 @@ operationExecutor
 .then(() => logger.toFile(`${WORK_DIR}/process.log`))
 .then(() => process.exit(0))
 .catch(err => {
-  console.log('err', err);
   let eGroup = logger.group('fatal-error');
   if (err.message) {
     eGroup.log(err.message);
     eGroup.log(err.stack);
+    eGroup.log(err.details || 'No additional details');
   } else {
     eGroup.log(err);
   }
@@ -475,6 +475,7 @@ function createTimeMatrixTask (data, osrmFile) {
         if (processError) {
           error = new Error(`calculateETA exited with error - ${processError.data}`);
           error.stack = processError.stack;
+          error.details = processError.details;
         } else {
           error = new Error(`calculateETA exited with error - unknown`);
         }

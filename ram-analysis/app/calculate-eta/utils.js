@@ -2,6 +2,7 @@
 import { featureCollection } from '@turf/helpers';
 import within from '@turf/within';
 import buffer from '@turf/buffer';
+import bbox from '@turf/bbox';
 
 /**
  * Create an array filled with a range of numbers starting at {start} and ending
@@ -13,7 +14,7 @@ import buffer from '@turf/buffer';
  */
 export function range (start, end) {
   let res = [];
-  for (var i = start; i < end; i++) { res.push(i); }
+  for (let i = start; i < end; i++) { res.push(i); }
   return res;
 }
 
@@ -25,7 +26,7 @@ export function range (start, end) {
  *   Origins in the given area
  */
 export function originsInRegion (area, origins) {
-  let result = within(origins, featureCollection([area]));
+  const result = within(origins, featureCollection([area]));
   return result;
 }
 
@@ -37,12 +38,21 @@ export function originsInRegion (area, origins) {
  * @param  {number} time    Value in seconds
  * @param  {number} speed   Value in km/h
  * @param  {FeatureCollection} poi     Points of Interest
+ *
+ * @throws RangeError
+ *
  * @return {FeatureCollection}
  *   The Points of Interest in the buffered area.
  */
 export function poisInBuffer (area, poi, time, speed) {
-  let distance = (time / 3600) * speed;
-  let bufferedArea = buffer(area, distance, 'kilometers');
-  var result = within(poi, featureCollection([bufferedArea]));
+  const distance = (time / 3600) * speed;
+  const bufferedArea = buffer(area, distance, 'kilometers');
+  const [e, s, w, n] = bbox(bufferedArea);
+
+  if (e < -180 && w > 180 && s < -85 && n > 85) {
+    throw new RangeError('World buffer overflow');
+  }
+
+  const result = within(poi, featureCollection([bufferedArea]));
   return result;
 }
