@@ -31,8 +31,13 @@ process.on('message', function (e) {
   try {
     init(e);
   } catch (err) {
-    process.send({type: 'error', data: err.message, stack: err.stack});
-    throw err;
+    process.send({
+      type: 'error',
+      data: err.message,
+      stack: err.stack,
+      details: err.details
+    });
+    process.exit(1);
   }
 });
 
