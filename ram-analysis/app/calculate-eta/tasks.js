@@ -71,7 +71,18 @@ export function createProcessAreaTask (workArea, poiByType, origins, osrm, maxTi
       let minPoi = Math.min(totalPoi, 4);
       process.send({type: 'debug', data: `Total poi of type ${key}: ${totalPoi}`, id: id});
       do {
-        poiSet = poisInBuffer(workArea, poiByType[key], time, speed);
+        // There may be situation where no points are found in the buffer even
+        // though it encompasses the whole world. In this case it throw an error
+        // Add some details to the error.
+        try {
+          poiSet = poisInBuffer(workArea, poiByType[key], time, speed);
+        } catch (err) {
+          if (err.message === 'World buffer overflow') {
+            err.details = `There are a total of ${totalPoi} pois of type "${key}" but none were found in the full world buffer.
+    This may mean that the poi coordinates system is not in the EPSG:4326 (WGS84) projection.`;
+          }
+          throw err;
+        }
         time += 900;
       } while (poiSet.features.length < minPoi);
       process.send({type: 'debug', data: `Using ${poiSet.features.length} pois. Time: ${time - 900}`, id: id});

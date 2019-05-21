@@ -33,161 +33,162 @@ try {
 
 logger.log('Max running processes set at', config.cpus);
 
-// Allow loading an operation through a given id.
-// This is useful when the app starts an operation that this worker has to use.
-// It's good to show the user feedback because there's some delay between the
-// time the worker is triggered to the moment it actually starts.
-//
-// If the id is given load the operation and handle it from there,
-// otherwise create a new one.
-let operationExecutor;
-if (isNaN(operationId)) {
-  operationExecutor = operation.start('generate-analysis', projId, scId);
-} else {
-  operationExecutor = operation.loadById(operationId);
-}
+async function main () {
+  try {
+    // Allow loading an operation through a given id.
+    // This is useful when the app starts an operation that this worker has to use.
+    // It's good to show the user feedback because there's some delay between the
+    // time the worker is triggered to the moment it actually starts.
+    //
+    // If the id is given load the operation and handle it from there,
+    // otherwise create a new one.
+    if (isNaN(operationId)) {
+      await operation.start('generate-analysis', projId, scId);
+    } else {
+      await operation.loadById(operationId);
+    }
 
-operationExecutor
-// Start by loading the info on all the project and scenario files needed
-// for the results processing.
-.then(() => fetchFilesInfo(projId, scId))
-.then(files => {
-  // Write files used by osm2osrm to disk.
-  return Promise.all([
-    writeFile(files.profile.path, `${WORK_DIR}/profile.lua`),
-    writeFile(files['road-network'].path, `${WORK_DIR}/road-network.osm`)
-  ])
-  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing started'}))
-  // Create orsm files and cleanup.
-  .then(() => osm2osrm(WORK_DIR))
-  .then(() => osm2osrmCleanup(WORK_DIR))
-  .then(() => operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'}));
-})
-// Fetch the remaining needed data.
-.then(() => Promise.all([
-  fetchOrigins(projId),
-  fetchPoi(projId, scId),
-  fetchAdminAreas(projId, scId)
-]))
-.then(res => {
-  logger.log('Data fetched');
-  let [origins, pois, adminAreasFC] = res;
-  totalAdminAreasToProcess = adminAreasFC.features.length;
+    const files = await fetchFilesInfo(projId, scId);
+    // Write files used by osm2osrm to disk.
+    await Promise.all([
+      writeFile(files.profile.path, `${WORK_DIR}/profile.lua`),
+      writeFile(files['road-network'].path, `${WORK_DIR}/road-network.osm`)
+    ]);
 
-  var timeMatrixTasks = adminAreasFC.features.map(area => {
-    const data = {
-      adminArea: area,
-      origins: origins,
-      pois,
-      maxSpeed: 120,
-      maxTime: 3600 / 2
-    };
-    return createTimeMatrixTask(data, `${WORK_DIR}/road-network.osrm`);
-  });
-  logger.log('Tasks created');
-  // createTimeMatrixTask need to be executed in parallel with a limit because
-  // they spawn new processes. Use async but Promisify to continue chain.
-  let timeMatrixRunner = new Promise((resolve, reject) => {
-    let time = Date.now();
-    async.parallelLimit(timeMatrixTasks, config.cpus, (err, adminAreasData) => {
-      if (err) return reject(err);
-      logger.log('Processed', timeMatrixTasks.length, 'admin areas in', (Date.now() - time) / 1000, 'seconds');
-      return resolve(adminAreasData);
+    await operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing started'});
+    // Create orsm files and cleanup.
+    await osm2osrm(WORK_DIR);
+    await osm2osrmCleanup(WORK_DIR);
+    await operation.log(opCodes.OP_OSRM, {message: 'osm2osrm processing finished'});
+
+    // Fetch the remaining needed data.
+    const [origins, pois, adminAreasFC] = await Promise.all([
+      fetchOrigins(projId),
+      fetchPoi(projId, scId),
+      fetchAdminAreas(projId, scId)
+    ]);
+    logger.log('Data fetched');
+
+    totalAdminAreasToProcess = adminAreasFC.features.length;
+
+    const timeMatrixTasks = adminAreasFC.features.map(area => {
+      const data = {
+        adminArea: area,
+        origins: origins,
+        pois,
+        maxSpeed: 120,
+        maxTime: 3600 / 2
+      };
+      return createTimeMatrixTask(data, `${WORK_DIR}/road-network.osrm`);
     });
-  });
+    logger.log('Tasks created');
 
-  return operation.log(opCodes.OP_ROUTING, {message: 'Routing started', count: timeMatrixTasks.length})
-    .then(() => timeMatrixRunner)
-    .then(adminAreasData => operation.log(opCodes.OP_ROUTING, {message: 'Routing complete'}).then(() => adminAreasData));
-})
-// DB storage.
-.then(adminAreasData => {
-  let results = [];
-  let resultsPois = [];
-  adminAreasData.forEach(aa => {
-    aa.json.forEach(o => {
-      results.push({
-        scenario_id: scId,
-        project_id: projId,
-        origin_id: o.id,
-        project_aa_id: aa.adminArea.id
+    // createTimeMatrixTask need to be executed in parallel with a limit because
+    // they spawn new processes. Use async but Promisify to continue chain.
+    await operation.log(opCodes.OP_ROUTING, {message: 'Routing started', count: timeMatrixTasks.length});
+    const adminAreasData = await new Promise((resolve, reject) => {
+      let time = Date.now();
+      async.parallelLimit(timeMatrixTasks, config.cpus, (err, adminAreasData) => {
+        if (err) return reject(err);
+        logger.log('Processed', timeMatrixTasks.length, 'admin areas in', (Date.now() - time) / 1000, 'seconds');
+        return resolve(adminAreasData);
       });
-
-      let pois = Object.keys(o.poi).map(k => ({
-        type: k,
-        time: o.poi[k] === null ? null : Math.round(o.poi[k])
-      }));
-      // Will be flattened later.
-      // The array is constructed in this way so we can match the index of the
-      // results array and attribute the correct id.
-      resultsPois.push(pois);
     });
-  });
+    await operation.log(opCodes.OP_ROUTING, {message: 'Routing complete'});
 
-  return db.transaction(function (trx) {
-    return trx.batchInsert('results', results)
-      .returning('id')
-      .then(ids => {
-        // Add ids to the resultsPoi and flatten the array in the process.
-        let flat = [];
-        resultsPois.forEach((resPoi, rexIdx) => {
-          resPoi.forEach(poi => {
-            poi.result_id = ids[rexIdx];
-            flat.push(poi);
-          });
+    // DB storage.
+    let results = [];
+    let resultsPois = [];
+    adminAreasData.forEach(aa => {
+      aa.json.forEach(o => {
+        results.push({
+          scenario_id: scId,
+          project_id: projId,
+          origin_id: o.id,
+          project_aa_id: aa.adminArea.id
         });
-        return flat;
-      })
-      .then(data => trx.batchInsert('results_poi', data));
-  })
-  .then(() => adminAreasData);
-})
-// S3 storage.
-.then(adminAreasData => {
-  logger.group('s3').log('Storing files');
 
-  return operation.log(opCodes.OP_RESULTS, {message: 'Storing results'})
-    .then(() => Promise.all([
+        let pois = Object.keys(o.poi).map(k => ({
+          type: k,
+          time: o.poi[k] === null ? null : Math.round(o.poi[k])
+        }));
+        // Will be flattened later.
+        // The array is constructed in this way so we can match the index of the
+        // results array and attribute the correct id.
+        resultsPois.push(pois);
+      });
+    });
+
+    await db.transaction(async function (trx) {
+      const ids = await trx.batchInsert('results', results)
+        .returning('id');
+
+      // Add ids to the resultsPoi and flatten the array in the process.
+      let flat = [];
+      resultsPois.forEach((resPoi, rexIdx) => {
+        resPoi.forEach(poi => {
+          poi.result_id = ids[rexIdx];
+          flat.push(poi);
+        });
+      });
+      await trx.batchInsert('results_poi', flat);
+    });
+
+    // S3 storage.
+    logger.group('s3').log('Storing files');
+
+    await operation.log(opCodes.OP_RESULTS, {message: 'Storing results'});
+    await Promise.all([
       // Generate a csv with all the results.
       saveScenarioFile('results-csv', 'all-csv', generateCSV(adminAreasData), projId, scId),
       // Generate a JSON file with all results.
       saveScenarioFile('results-json', 'all-json', generateJSON(adminAreasData), projId, scId),
       // For all admin areas combined, results are stored in GeoJSON format.
       saveScenarioFile('results-geojson', 'all-geojson', generateGeoJSON(adminAreasData), projId, scId)
-    ]))
-    .then(() => operation.log(opCodes.OP_RESULTS, {message: 'Storing results complete'}))
-    .then(() => {
-      logger.group('s3').log('Storing files complete');
-    });
-})
-// Update generation time.
-.then(() => db('scenarios_settings')
-  .update({value: (new Date())})
-  .where('scenario_id', scId)
-  .where('key', 'res_gen_at')
-)
-.then(() => operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'}))
-.then(() => operation.log(opCodes.OP_SUCCESS, {message: 'Operation complete'}))
-.then(() => operation.finish())
-.then(() => logger.toFile(`${WORK_DIR}/process.log`))
-.then(() => process.exit(0))
-.catch(err => {
-  console.log('err', err);
-  let eGroup = logger.group('fatal-error');
-  if (err.message) {
-    eGroup.log(err.message);
-    eGroup.log(err.stack);
-  } else {
-    eGroup.log(err);
+    ]);
+    await operation.log(opCodes.OP_RESULTS, {message: 'Storing results complete'});
+    logger.group('s3').log('Storing files complete');
+
+    // Update generation time.
+    await db('scenarios_settings')
+      .update({value: new Date()})
+      .where('scenario_id', scId)
+      .where('key', 'res_gen_at');
+
+    await operation.log(opCodes.OP_RESULTS_FILES, {message: 'Files written'});
+    await operation.log(opCodes.OP_SUCCESS, {message: 'Operation complete'});
+    await operation.finish();
+
+    logger.toFile(`${WORK_DIR}/process.log`);
+    process.exit(0);
+
+  // Error handling.
+  } catch (err) {
+    const eGroup = logger.group('fatal-error');
+    if (err.message) {
+      eGroup.log(err.message);
+      eGroup.log(err.stack);
+      eGroup.log(err.details || 'No additional details');
+    } else {
+      eGroup.log(err);
+    }
+    logger.toFile(`${WORK_DIR}/process.log`);
+
+    try {
+      await operation.log(opCodes.OP_ERROR, {error: err.message || err});
+      await operation.finish();
+      process.exit(1);
+    } catch (error) {
+      // If it errors again exit.
+      // This is especially important in the case of DB errors.
+      eGroup.log('Error saving error');
+      process.exit(1);
+    }
   }
-  logger.toFile(`${WORK_DIR}/process.log`);
-  operation.log(opCodes.OP_ERROR, {error: err.message || err})
-    .then(() => operation.finish())
-    .then(() => process.exit(1))
-    // If it errors again exit.
-    // This is especially important in the case of DB errors.
-    .catch(() => process.exit(1));
-});
+}
+
+// Start!
+main();
 
 //
 // Execution code ends here. From here on there are the helper functions
@@ -196,8 +197,8 @@ operationExecutor
 // This is just a little separation.
 //
 
-function fetchFilesInfo (projId, scId) {
-  return Promise.all([
+async function fetchFilesInfo (projId, scId) {
+  const [profile, rn] = await Promise.all([
     db('projects_files')
       .select('*')
       .whereIn('type', ['profile'])
@@ -209,15 +210,16 @@ function fetchFilesInfo (projId, scId) {
       .where('project_id', projId)
       .where('scenario_id', scId)
       .first()
-  ])
-  .then(files => ({
-    'profile': files[0],
-    'road-network': files[1]
-  }));
+  ]);
+
+  return {
+    'profile': profile,
+    'road-network': rn
+  };
 }
 
-function fetchOrigins (projId) {
-  return db('projects_origins')
+async function fetchOrigins (projId) {
+  const origins = await db('projects_origins')
     .select(
       'projects_origins.id',
       'projects_origins.name',
@@ -226,75 +228,69 @@ function fetchOrigins (projId) {
       'projects_origins_indicators.value'
     )
     .innerJoin('projects_origins_indicators', 'projects_origins.id', 'projects_origins_indicators.origin_id')
-    .where('project_id', projId)
-    .then(origins => {
-      // Group by indicators.
-      let indGroup = {};
-      origins.forEach(o => {
-        let hold = indGroup[o.id];
-        if (!hold) {
-          hold = {
-            id: o.id,
-            name: o.name,
-            coordinates: o.coordinates
-          };
-        }
-        hold[o.key] = o.value;
-        indGroup[o.id] = hold;
-      });
+    .where('project_id', projId);
 
-      return {
-        type: 'FeatureCollection',
-        features: Object.keys(indGroup).map(k => {
-          let props = Object.assign({}, indGroup[k]);
-          delete props.coordinates;
-          return {
-            type: 'Feature',
-            properties: props,
-            geometry: {
-              type: 'Point',
-              coordinates: indGroup[k].coordinates
-            }
-          };
-        })
+  // Group by indicators.
+  let indGroup = {};
+  origins.forEach(o => {
+    let hold = indGroup[o.id];
+    if (!hold) {
+      hold = {
+        id: o.id,
+        name: o.name,
+        coordinates: o.coordinates
       };
+    }
+    hold[o.key] = o.value;
+    indGroup[o.id] = hold;
+  });
 
-      // Convert origins to featureCollection.
-      // TODO: Use this once the results are returned from the db.
-      // return {
-      //   type: 'FeatureCollection',
-      //   features: origins.map(o => ({
-      //     type: 'Feature',
-      //     properties: {
-      //       id: o.id,
-      //       name: o.name
-      //     },
-      //     geometry: {
-      //       type: 'Point',
-      //       coordinates: o.coordinates
-      //     }
-      //   }))
-      // };
-    });
+  return {
+    type: 'FeatureCollection',
+    features: Object.keys(indGroup).map(k => {
+      let props = Object.assign({}, indGroup[k]);
+      delete props.coordinates;
+      return {
+        type: 'Feature',
+        properties: props,
+        geometry: {
+          type: 'Point',
+          coordinates: indGroup[k].coordinates
+        }
+      };
+    })
+  };
+
+  // Convert origins to featureCollection.
+  // TODO: Use this once the results are returned from the db.
+  // return {
+  //   type: 'FeatureCollection',
+  //   features: origins.map(o => ({
+  //     type: 'Feature',
+  //     properties: {
+  //       id: o.id,
+  //       name: o.name
+  //     },
+  //     geometry: {
+  //       type: 'Point',
+  //       coordinates: o.coordinates
+  //     }
+  //   }))
+  // };
 }
 
-function fetchPoi (projId, scId) {
-  return db('scenarios_files')
+async function fetchPoi (projId, scId) {
+  const files = await db('scenarios_files')
     .select('*')
     .where('type', 'poi')
     .where('project_id', projId)
-    .where('scenario_id', scId)
-    .then(files => Promise.all(files.map(f => getJSONFileContents(f.path)))
-      .then(fileData => {
-        // Index pois by subtype.
-        let loaded = {};
-        files.forEach((file, idx) => {
-          loaded[file.subtype] = fileData[idx];
-        });
+    .where('scenario_id', scId);
 
-        return loaded;
-      })
-    );
+  const fileData = await Promise.all(files.map(f => getJSONFileContents(f.path)));
+  // Index pois by subtype.
+  return files.reduce((acc, file, idx) => (
+    {...acc, [file.subtype]: fileData[idx]}
+  ), {});
 }
 
 const arrayDepth = (arr) => Array.isArray(arr) ? arrayDepth(arr[0]) + 1 : 0;
@@ -309,39 +305,37 @@ const getGeometryType = (geometry) => {
   }
 };
 
-function fetchAdminAreas (projId, scId) {
-  return db('scenarios_settings')
+async function fetchAdminAreas (projId, scId) {
+  const aaSettings = await db('scenarios_settings')
     .select('value')
     .where('key', 'admin_areas')
     .where('scenario_id', scId)
-    .first()
-    .then(aa => JSON.parse(aa.value))
-    .then(selectedAA => {
-      // Get selected adminAreas.
-      return db('projects_aa')
-        .select('*')
-        .where('project_id', projId)
-        .whereIn('id', selectedAA)
-        .then(aa => {
-          // Convert admin areas to featureCollection.
-          return {
-            type: 'FeatureCollection',
-            features: aa.map(o => ({
-              type: 'Feature',
-              properties: {
-                id: o.id,
-                name: o.name,
-                type: o.type,
-                project_id: o.project_id
-              },
-              geometry: {
-                type: getGeometryType(o.geometry),
-                coordinates: o.geometry
-              }
-            }))
-          };
-        });
-    });
+    .first();
+
+  const selectedAA = JSON.parse(aaSettings.value);
+  // Get selected adminAreas.
+  const aa = await db('projects_aa')
+    .select('*')
+    .where('project_id', projId)
+    .whereIn('id', selectedAA);
+
+  // Convert admin areas to featureCollection.
+  return {
+    type: 'FeatureCollection',
+    features: aa.map(o => ({
+      type: 'Feature',
+      properties: {
+        id: o.id,
+        name: o.name,
+        type: o.type,
+        project_id: o.project_id
+      },
+      geometry: {
+        type: getGeometryType(o.geometry),
+        coordinates: o.geometry
+      }
+    }))
+  };
 }
 
 /**
@@ -475,6 +469,7 @@ function createTimeMatrixTask (data, osrmFile) {
         if (processError) {
           error = new Error(`calculateETA exited with error - ${processError.data}`);
           error.stack = processError.stack;
+          error.details = processError.details;
         } else {
           error = new Error(`calculateETA exited with error - unknown`);
         }
@@ -492,7 +487,7 @@ function createTimeMatrixTask (data, osrmFile) {
  * @param  {number} scId   Scenario id.
  * @return {Promise}
  */
-function saveScenarioFile (type, name, data, projId, scId) {
+async function saveScenarioFile (type, name, data, projId, scId) {
   const fileName = `results_${name}_${Date.now()}`;
   const filePath = `scenario-${scId}/${fileName}`;
   const fileData = {
@@ -501,23 +496,19 @@ function saveScenarioFile (type, name, data, projId, scId) {
     path: filePath,
     project_id: projId,
     scenario_id: scId,
-    created_at: (new Date()),
-    updated_at: (new Date())
+    created_at: new Date(),
+    updated_at: new Date()
   };
 
   logger.group('s3').log('Saving file', filePath);
-  let contents = typeof data === 'string' ? data : JSON.stringify(data);
-  return putFile(filePath, contents)
-    .then(() => db('scenarios_files')
-      .returning('*')
-      .insert(fileData)
-      .then(() => db('projects')
-        .update({
-          updated_at: (new Date())
-        })
-        .where('id', projId)
-      )
-    );
+  const contents = typeof data === 'string' ? data : JSON.stringify(data);
+  await putFile(filePath, contents);
+  await db('scenarios_files')
+    .returning('*')
+    .insert(fileData);
+  await db('projects')
+    .update({ updated_at: new Date() })
+    .where('id', projId);
 }
 
 /**
@@ -527,7 +518,7 @@ function saveScenarioFile (type, name, data, projId, scId) {
  */
 function generateGeoJSON (data) {
   // Flatten the results array
-  let jsonResults = [].concat.apply([], data.map(o => o.json));
+  const jsonResults = [].concat.apply([], data.map(o => o.json));
   return {
     type: 'FeatureCollection',
     features: jsonResults.map(r => {
@@ -573,9 +564,9 @@ function generateJSON (data) {
  */
 function generateCSV (data) {
   // Merge all the results together.
-  let results = data.reduce((acc, o) => {
+  const results = data.reduce((acc, o) => {
     if (o.json.length) {
-      let items = o.json.map(item => {
+      const items = o.json.map(item => {
         item['admin_area'] = o.adminArea.name;
         return item;
       });
@@ -602,10 +593,10 @@ function generateCSV (data) {
   // [prop1, prop2, prop3, poi.poiName]
   //
   // Poi fields as paths for nested objects.
-  let poiFields = Object.keys(results[0].poi).map(o => `poi.${o}`);
+  const poiFields = Object.keys(results[0].poi).map(o => `poi.${o}`);
 
   // Get other fields, exclude poi and include new poi.
-  let fields = Object.keys(results[0])
+  const fields = Object.keys(results[0])
     .filter(o => o !== 'poi')
     .concat(poiFields);
 
